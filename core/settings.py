@@ -577,16 +577,6 @@ CKEDITOR_5_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 # Channels Configuration (for WebSocket)
 ASGI_APPLICATION = 'core.asgi.application'
 
-# CHANNEL_LAYERS = {
-#     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             "hosts": [(os.getenv('REDIS_HOST') or 'localhost',
-#                        int(os.getenv('REDIS_PORT') or '6379'))],
-#         },
-#     },
-# }
-
 
 # Verification Service Configuration
 # VERIFICATION_BASE_URL = os.getenv("VERIFICATION_BASE_URL", "https://document-verification-ai-chatbot.onrender.com")
