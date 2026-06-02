@@ -46,6 +46,8 @@ INSTALLED_APPS = [
     'django_celery_beat',
     
     # Local apps
+    'notifications',
+    'users',
 ]
 
 MIDDLEWARE = [
@@ -199,7 +201,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
-# AUTH_USER_MODEL = 'user.User'
+AUTH_USER_MODEL = 'users.User'
 
 
 # # Security Settings (Data Encryption)
