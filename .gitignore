@@ -261,3 +261,4 @@ celerybeat.pid
 GITHUB_SECRETS_GUIDE.md
 
 /.refact
+/.continue

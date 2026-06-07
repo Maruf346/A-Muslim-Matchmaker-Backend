@@ -1,28 +1,53 @@
 """
 notifications/tasks.py
 
-Celery tasks for periodic / deferred notification delivery.
-Register new tasks here and wire them into core/celery.py beat_schedule.
+Celery tasks for deferred or periodic notification delivery.
+
+To add a new periodic task:
+    1. Define a @shared_task here.
+    2. Register it in core/celery.py under app.conf.beat_schedule.
+
+Current tasks:
+    (none active — placeholders ready for future use)
 """
 
 import logging
 
 from celery import shared_task
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
-# @shared_task(name="notifications.check_user_milestones")
-# def check_user_milestones():
-#     """Run periodically; notify admins when the platform hits notable user counts."""
-#     from notifications.services import NotificationTemplates
+# ─────────────────────────────────────────────────────────────────────────────
+# Example: send a deferred notification asynchronously via Celery
+# ─────────────────────────────────────────────────────────────────────────────
 
-#     milestones = [100, 500, 1_000, 5_000, 10_000, 50_000, 100_000]
-#     total = User.objects.filter(is_staff=False, is_superuser=False).count()
-#     if total in milestones:
-#         NotificationTemplates.milestone_achieved("clients", total)
-#         logger.info("Milestone hit: %d clients", total)
-
+# @shared_task(name="notifications.send_deferred_notification")
+# def send_deferred_notification(user_id: str, notification_type: str, title: str, body: str, data: dict = None):
+#     """
+#     Send a single notification asynchronously.
+#     Useful when you want to defer delivery without blocking the request cycle.
+#
+#     Usage:
+#         send_deferred_notification.delay(
+#             user_id=str(user.id),
+#             notification_type=NotificationType.WELCOME,
+#             title="Welcome!",
+#             body="Your account is ready.",
+#         )
+#     """
+#     from notifications.services import NotificationService
+#     try:
+#         user = User.objects.get(id=user_id)
+#         NotificationService.send(
+#             user=user,
+#             notification_type=notification_type,
+#             title=title,
+#             body=body,
+#             data=data or {},
+#         )
+#         logger.info("Deferred notification sent to user %s", user_id)
+#     except User.DoesNotExist:
+#         logger.error("send_deferred_notification: user %s not found", user_id)
