@@ -188,7 +188,7 @@ class NotificationTemplates:
             user=user,
             notification_type=NotificationType.WELCOME,
             title="Welcome to A Muslim Matchmaker 🌙",
-            body=f"As-salamu alaykum {user.full_name or user.email}! Your account is ready. Complete your profile to get started.",
+            body=f"As-salamu alaykum {user.first_name} {user.last_name} or {user.email}! Your account is ready. Complete your profile to get started.",
             priority=NotificationPriority.NORMAL,
         )
 
@@ -439,6 +439,6 @@ class NotificationTemplates:
         NotificationService.send_to_all_admins(
             notification_type=NotificationType.NEW_USER_JOINED,
             title=f"New {role_display} Registered",
-            body=f"{new_user.full_name or new_user.email} ({new_user.codename}) just joined AMM.",
+            body=f"{new_user.first_name} {new_user.last_name} or {new_user.email} ({new_user.codename}) just joined AMM.",
             data={"user_id": str(new_user.id), "codename": new_user.codename, "role": new_user.role},
         )

@@ -1,20 +1,18 @@
 """
-user/services.py
+users/services.py
 
 Service layer — keeps views thin and business logic testable.
 
 Classes:
     OTPService              — generate / store / verify OTPs via Redis
-    RegistrationService     — client & artisan OTP-based registration
+    RegistrationService     — OTP-gated registration for Male, Female, Wali
     PasswordResetService    — OTP + token password reset flow
-    ReferralService         — apply referral codes on signup
 """
 
 import logging
 import random
 import secrets
 import string
-from datetime import date
 
 from django.conf import settings
 from django.core.cache import cache
@@ -47,148 +45,196 @@ class OTPService:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Registration Service  (client)
+# Registration Service
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RegistrationService:
-    """Handles OTP-gated client registration flow."""
+    """
+    Handles OTP-gated 2-step registration for Male, Female, and Wali users.
 
-    @staticmethod
-    def initiate_registration(email: str, password: str, full_name: str, phone: str = None) -> dict:
+    Flow:
+        Step 1 — initiate_registration(role, ...) → stores payload in Redis, sends OTP email
+        Step 2 — verify_and_complete_registration(role, email, otp) → creates User, returns tokens
+
+    The `role` parameter drives:
+        - Which Redis cache key namespace is used
+        - Which gender is assigned (male→MALE, female→FEMALE, wali→None)
+        - Whether is_staff/is_superuser flags are set (all False for normal users)
+    """
+
+    # Cache key prefix per role — prevents cross-role OTP confusion
+    _CACHE_PREFIX = {
+        "male":   "registration_otp:male:",
+        "female": "registration_otp:female:",
+        "wali":   "registration_otp:wali:",
+    }
+
+    # Gender assigned at registration per role
+    _GENDER_MAP = {
+        "male":   "male",
+        "female": "female",
+        "wali":   None,  # Wali sets gender during onboarding (questions app)
+    }
+
+    @classmethod
+    def initiate_registration(
+        cls,
+        role: str,
+        email: str,
+        password: str,        # already validated (confirm_pass checked in serializer)
+        first_name : str,
+        last_name  : str,
+    ) -> dict:
+        """
+        Step 1: Validate uniqueness, store OTP payload in Redis, send OTP email.
+
+        Args:
+            role: "male", "female", or "wali"
+            email: normalized email
+            password: raw password (will be hashed before storing)
+            first_name: user's first name
+            last_name: user's last name
+
+        Returns:
+            dict with message and expiry info.
+        """
         from django.contrib.auth.hashers import make_password
         from users.models import User
 
         if User.objects.filter(email=email).exists():
             raise ValueError("This email is already registered.")
 
-        otp = OTPService.generate_otp()
-        cache_key = f"registration_otp:{email}"
+        if role not in cls._CACHE_PREFIX:
+            raise ValueError(f"Invalid role: {role}. Must be male, female, or wali.")
+
+        otp       = OTPService.generate_otp()
+        cache_key = cls._CACHE_PREFIX[role] + email
+
         payload = {
             "email":     email,
-            "full_name": full_name,
-            "phone":     phone,
+            "first_name": first_name,
+            "last_name":  last_name,
+            "phone":     None,  # optional, can be set during onboarding
             "password":  make_password(password),
+            "role":      role,
             "otp":       otp,
         }
         cache.set(cache_key, payload, settings.OTP_EXPIRY_SECONDS)
 
         try:
             from users.tasks import send_registration_otp_email
-            send_registration_otp_email.delay(email, otp, full_name)
+            send_registration_otp_email.delay(email, otp, f"{first_name} {last_name}")
         except Exception as exc:
-            logger.error("Failed to queue registration OTP email: %s", exc)
+            logger.error("Failed to queue registration OTP email for %s: %s", email, exc)
 
         return {
-            "message":           "OTP sent to your email. Please verify to complete registration.",
-            "email":             email,
+            "message":            "OTP sent to your email. Please verify to complete registration.",
+            "email":              email,
             "expires_in_seconds": settings.OTP_EXPIRY_SECONDS,
         }
 
-    @staticmethod
-    def verify_and_complete_registration(email: str, otp: str, referral_code: str = None) -> dict:
-        from users.models import AuthProvider, User
+    @classmethod
+    def verify_and_complete_registration(cls, role: str, email: str, otp: str) -> dict:
+        """
+        Step 2: Verify OTP, create User, assign codename, return tokens.
 
-        cache_key = f"registration_otp:{email}"
-        payload = cache.get(cache_key)
+        Args:
+            role:  "male", "female", or "wali"
+            email: normalized email
+            otp:   6-digit OTP submitted by user
+
+        Returns:
+            dict with user object and JWT tokens.
+
+        Raises:
+            ValueError on OTP mismatch/expiry.
+        """
+        from users.models import AuthProvider, Gender, User, UserRole, UserSettings, generate_codename
+
+        if role not in cls._CACHE_PREFIX:
+            raise ValueError(f"Invalid role: {role}.")
+
+        cache_key = cls._CACHE_PREFIX[role] + email
+        payload   = cache.get(cache_key)
+
         if not payload:
-            raise ValueError("OTP expired. Please restart registration.")
+            raise ValueError("OTP expired or not found. Please restart registration.")
         if payload["otp"] != otp:
             raise ValueError("Invalid OTP.")
 
+        # Map role string to UserRole choice
+        role_map = {
+            "male":   UserRole.MALE,
+            "female": UserRole.FEMALE,
+            "wali":   UserRole.WALI,
+        }
+
+        gender = cls._GENDER_MAP.get(role)
+
         user = User.objects.create(
             email=email,
-            full_name=payload["full_name"],
-            phone=payload.get("phone") or "",
-            password=payload["password"],
+            first_name=payload["first_name"],
+            last_name=payload["last_name"],
+            password=payload["password"],   # already hashed
+            role=role_map[role],
+            gender=gender,
             is_active=True,
             is_staff=False,
             is_superuser=False,
             provider=AuthProvider.SELF,
         )
-        cache.delete(cache_key)
 
-        # Handle referral
-        if referral_code:
-            ReferralService.apply_referral(referral_code=referral_code, new_user=user)
+        # Assign unique codename
+        codename = generate_codename()
+        while User.objects.filter(codename=codename).exclude(pk=user.pk).exists():
+            codename = f"MMK{User.objects.count():04d}"
+        user.codename = codename
+        user.save(update_fields=["codename"])
+
+        # Create default settings
+        UserSettings.objects.create(user=user)
+
+        # Clear OTP cache
+        cache.delete(cache_key)
 
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
 
         return {
             "user":          user,
-            "refresh_token": str(refresh),
             "access_token":  str(refresh.access_token),
+            "refresh_token": str(refresh),
         }
 
+    @classmethod
+    def resend_otp(cls, role: str, email: str) -> dict:
+        """
+        Resend OTP for an existing pending registration.
+        Requires that step 1 was already called (payload must be in cache).
+        """
+        if role not in cls._CACHE_PREFIX:
+            raise ValueError(f"Invalid role: {role}.")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Artisan Registration Service
-# ─────────────────────────────────────────────────────────────────────────────
+        cache_key = cls._CACHE_PREFIX[role] + email
+        payload   = cache.get(cache_key)
 
-class ArtisanRegistrationService:
-    """Handles OTP-gated artisan registration flow."""
+        if not payload:
+            raise ValueError("Registration session expired. Please restart registration.")
 
-    @staticmethod
-    def initiate_registration(email: str, password: str, full_name: str, phone: str = None) -> dict:
-        from django.contrib.auth.hashers import make_password
-        from users.models import User
-
-        if User.objects.filter(email=email).exists():
-            raise ValueError("This email is already registered.")
-
-        otp = OTPService.generate_otp()
-        cache_key = f"artisan_registration_otp:{email}"
-        payload = {
-            "email":     email,
-            "full_name": full_name,
-            "phone":     phone,
-            "password":  make_password(password),
-            "otp":       otp,
-        }
+        new_otp = OTPService.generate_otp()
+        payload["otp"] = new_otp
         cache.set(cache_key, payload, settings.OTP_EXPIRY_SECONDS)
 
         try:
             from users.tasks import send_registration_otp_email
-            send_registration_otp_email.delay(email, otp, full_name)
+            send_registration_otp_email.delay(email, new_otp, f"{payload.get('first_name', '')} {payload.get('last_name', '')}")
         except Exception as exc:
-            logger.error("Failed to queue artisan OTP email: %s", exc)
+            logger.error("Failed to resend OTP for %s: %s", email, exc)
 
         return {
-            "message":           "OTP sent. Please verify to complete artisan registration.",
-            "email":             email,
+            "message":            "A new OTP has been sent to your email.",
+            "email":              email,
             "expires_in_seconds": settings.OTP_EXPIRY_SECONDS,
-        }
-
-    @staticmethod
-    def verify_and_complete_registration(email: str, otp: str) -> dict:
-        from users.models import AuthProvider, User
-
-        cache_key = f"artisan_registration_otp:{email}"
-        payload = cache.get(cache_key)
-        if not payload:
-            raise ValueError("OTP expired. Please restart registration.")
-        if payload["otp"] != otp:
-            raise ValueError("Invalid OTP.")
-
-        user = User.objects.create(
-            email=email,
-            full_name=payload["full_name"],
-            phone=payload.get("phone") or "",
-            password=payload["password"],
-            is_active=True,
-            is_staff=True,        # artisan
-            is_superuser=False,
-            provider=AuthProvider.SELF,
-        )
-        cache.delete(cache_key)
-
-        from rest_framework_simplejwt.tokens import RefreshToken
-        refresh = RefreshToken.for_user(user)
-
-        return {
-            "user":          user,
-            "refresh_token": str(refresh),
-            "access_token":  str(refresh.access_token),
         }
 
 
@@ -197,37 +243,53 @@ class ArtisanRegistrationService:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PasswordResetService:
+    """
+    3-step flow:
+        1. initiate_password_reset(email) → sends OTP
+        2. verify_reset_otp(email, otp)   → returns one-time reset_token
+        3. reset_password(reset_token, new_password) → updates password
+
+    Timing constants (from settings):
+        OTP:         PASSWORD_RESET_OTP_EXPIRY_SECONDS   (default 600 = 10 min)
+        reset_token: PASSWORD_RESET_TOKEN_EXPIRY_SECONDS  (default 900 = 15 min)
+    """
+
     @staticmethod
     def initiate_password_reset(email: str) -> dict:
         from users.models import User
 
-        # Never reveal if email exists
+        # Never reveal whether the email is registered
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return {
-                "message":           "If this email is registered, an OTP has been sent.",
+                "message":            "If this email is registered, an OTP has been sent.",
                 "expires_in_seconds": settings.PASSWORD_RESET_OTP_EXPIRY_SECONDS,
             }
 
         otp = OTPService.generate_otp()
-        cache.set(f"password_reset_otp:{email}", otp, settings.PASSWORD_RESET_OTP_EXPIRY_SECONDS)
+        cache.set(
+            f"password_reset_otp:{email}",
+            otp,
+            settings.PASSWORD_RESET_OTP_EXPIRY_SECONDS,
+        )
 
         try:
             from users.tasks import send_password_reset_otp_email
-            send_password_reset_otp_email.delay(email, otp, user.full_name or email)
+            send_password_reset_otp_email.delay(email, otp, f"{user.first_name} {user.last_name}")
         except Exception as exc:
-            logger.error("Failed to queue password reset OTP email: %s", exc)
+            logger.error("Failed to queue password reset OTP for %s: %s", email, exc)
 
         return {
-            "message":           "If this email is registered, an OTP has been sent.",
+            "message":            "If this email is registered, an OTP has been sent.",
             "expires_in_seconds": settings.PASSWORD_RESET_OTP_EXPIRY_SECONDS,
         }
 
     @staticmethod
     def verify_reset_otp(email: str, otp: str) -> dict:
-        key = f"password_reset_otp:{email}"
+        key    = f"password_reset_otp:{email}"
         stored = cache.get(key)
+
         if not stored:
             raise ValueError("OTP expired or not found.")
         if stored != otp:
@@ -264,48 +326,52 @@ class PasswordResetService:
         user.save(update_fields=["password"])
         cache.delete(f"password_reset_token:{reset_token}")
 
-        return {
-            "message": "Password reset successful. Please log in with your new password.",
-            "user_id": str(user.id),
-        }
+        return {"message": "Password reset successful. Please log in.", "user": user}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Referral Service
+# Matchmaker Management Service  (superadmin only)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ReferralService:
-    @staticmethod
-    def generate_code(user) -> str:
-        """Generate and persist a unique referral code for a user."""
-        import hashlib
-        code = hashlib.sha256(str(user.id).encode()).hexdigest()[:8].upper()
-        # Persist in cache; when a proper referral_code field is added to User, store there
-        cache.set(f"referral_code:{code}", str(user.id), timeout=None)
-        return code
+class MatchmakerService:
+    """
+    Superadmin-only operations on Matchmaker accounts.
+    Matchmakers cannot self-register — only superadmin can create them.
+    """
 
     @staticmethod
-    def apply_referral(referral_code: str, new_user) -> bool:
-        from users.models import Referral, User
+    def create_matchmaker(email: str, password: str, first_name: str, last_name: str):
+        """Create a new Matchmaker account. No OTP — admin sets password directly."""
+        from users.models import AuthProvider, User, UserRole, UserSettings
 
-        referrer_id = cache.get(f"referral_code:{referral_code.upper()}")
-        if not referrer_id:
-            return False
-        try:
-            referrer = User.objects.get(id=referrer_id)
-        except User.DoesNotExist:
-            return False
+        if User.objects.filter(email=email).exists():
+            raise ValueError("This email is already registered.")
 
-        if referrer == new_user:
-            return False   # Can't refer yourself
+        user = User.objects.create(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            role=UserRole.MATCHMAKER,
+            is_active=True,
+            is_staff=True,
+            is_superuser=False,
+            provider=AuthProvider.SELF,
+        )
+        user.set_password(password)
+        user.save(update_fields=["password"])
+        UserSettings.objects.create(user=user)
+        return user
 
-        Referral.objects.get_or_create(referrer=referrer, referred=new_user)
+    @staticmethod
+    def change_role(user, new_role: str):
+        """Promote matchmaker to superadmin or demote superadmin to matchmaker."""
+        from users.models import UserRole
 
-        bonus = getattr(settings, "REFERRAL_BONUS_AMOUNT", 5.00)
-        try:
-            from notifications.services import NotificationTemplates
-            NotificationTemplates.referral_bonus(referrer, bonus)
-        except Exception as exc:
-            logger.error("Failed to send referral bonus notification: %s", exc)
+        if new_role not in (UserRole.MATCHMAKER, UserRole.SUPERADMIN):
+            raise ValueError("Role must be 'matchmaker' or 'superadmin'.")
 
-        return True
+        user.role        = new_role
+        user.is_staff    = True
+        user.is_superuser = (new_role == UserRole.SUPERADMIN)
+        user.save(update_fields=["role", "is_staff", "is_superuser"])
+        return user

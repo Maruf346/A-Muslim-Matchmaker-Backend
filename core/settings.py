@@ -58,6 +58,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'users.middleware.LastActiveMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -175,7 +176,7 @@ CACHES = {
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         },
-        'KEY_PREFIX': 'adelaideplumbing',   # Adds a prefix to every cache key.
+        'KEY_PREFIX': 'amm',   # Adds a prefix to every cache key.
         'TIMEOUT': 300,  # Default cache expiry time = 300s (5 mins).
     }
 }
@@ -302,12 +303,16 @@ REST_FRAMEWORK = {
 
 # drf-spectacular settings
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'FixGo: On-Demand Artisan Service Platform API',
-    'DESCRIPTION': "API for FixGo: On-Demand Artisan Service Platform. Provides endpoints for user authentication, service management, bookings, reviews, and more.",
-    'VERSION': '1.0.1',
-    'TERMS_OF_SERVICE': 'https://www.google.com/policies/terms/',
-    'CONTACT': {'email': 'maruf.bshs@gmail.com'},
-    'LICENSE': {'name': 'BSD License'},
+    'TITLE': 'A Muslim Matchmaker (AMM) API',
+    'DESCRIPTION': (
+        'API for A Muslim Matchmaker — a trusted matrimonial platform for conservative Sunni Muslims. '
+        'Provides endpoints for authentication, profile management, connection requests, matches, '
+        'notifications, chat, and private matchmaking.'
+    ),
+    'VERSION': '1.0.0',
+    'TERMS_OF_SERVICE': '',
+    'CONTACT': {'email': 'support@amuslimmatrimony.com'},
+    'LICENSE': {'name': 'Proprietary'},
     'SERVE_INCLUDE_SCHEMA': False,
     
     # Postman friendly settings
@@ -320,11 +325,11 @@ SPECTACULAR_SETTINGS = {
 
 # Jazzmin settings
 JAZZMIN_SETTINGS = {
-    "site_title": "FixGo Admin",
-    "site_header": "FixGo",
-    "site_brand": "FixGo",
-    "welcome_sign": "Welcome to the FixGo Admin Panel",
-    "copyright": "FixGo © 2026",
+    "site_title": "AMM Admin",
+    "site_header": "A Muslim Matchmaker",
+    "site_brand": "AMM",
+    "welcome_sign": "Welcome to the AMM Admin Panel",
+    "copyright": "A Muslim Matchmaker © 2026",
     "user_avatar": None,
     "icons": {
         "auth": "fas fa-users-cog",
@@ -430,6 +435,8 @@ OTP_EXPIRY_SECONDS                  = int(os.getenv("OTP_EXPIRY_SECONDS", "300")
 PASSWORD_RESET_OTP_EXPIRY_SECONDS   = int(os.getenv("PASSWORD_RESET_OTP_EXPIRY_SECONDS", "600"))
 PASSWORD_RESET_TOKEN_EXPIRY_SECONDS = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRY_SECONDS", "900"))
 
+# New — controls how often LastActiveMiddleware writes to DB (seconds)
+LAST_ACTIVE_UPDATE_INTERVAL = int(os.getenv("LAST_ACTIVE_UPDATE_INTERVAL", "120"))  # 2 min
 
 # CKEditor 5 Configuration
 CKEDITOR_5_CONFIGS = {

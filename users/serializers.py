@@ -2,10 +2,11 @@
 users/serializers.py
 
 Organized by concern:
-    1. Registration (Male + Female + Wali) with OTP verification
-    2. Authentication (login, logout, password change/reset)
-    3. OAuth (Google, Apple)
-    4. Profile (read + update)
+    1. Registration  — Male, Female, Wali (2-step OTP flow each)
+    2. Authentication — login per role, logout, password change/reset
+    3. OAuth          — Google, Apple (shared across Male/Female/Wali)
+    4. Profile        — read, update, profile picture
+    5. Admin          — admin profile, matchmaker management
 """
 
 import logging
@@ -25,109 +26,142 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import *
 
-
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Internal helper
-# ═══════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _build_user_data(user: User) -> dict:
+def _build_token_data(user) -> dict:
+    """Build the standard token + user payload returned on login/register."""
+    refresh = RefreshToken.for_user(user)
     return {
-        "id":              str(user.id),
-        "full_name":       user.full_name,
-        "email":           user.email,
-        "role":            user.role,
-        "profile_picture": user.profile_picture.url if user.profile_picture else None,
+        "access_token":  str(refresh.access_token),
+        "refresh_token": str(refresh),
+        "user": {
+            "id":               str(user.id),
+            "codename":         user.codename,
+            "first_name":        user.first_name,
+            "last_name":         user.last_name,
+            "email":            user.email,
+            "role":             user.role,
+            "subscription_plan": user.subscription_plan,
+            "profile_picture":  user.profile_picture.url if user.profile_picture else None,
+        },
     }
-    
 
-# ═══════════════════════════════════════════════════════════════════
-# 1. Registration
-# ═══════════════════════════════════════════════════════════════════
 
-class InitiateClientRegistrationSerializer(serializers.Serializer):
-    full_name = serializers.CharField(max_length=150, required=True)
-    email     = serializers.EmailField(required=True)
-    phone     = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    password  = serializers.CharField(
-        min_length=8, write_only=True, required=True,
-        style={"input_type": "password"},
+def _validate_email_unique(value: str) -> str:
+    value = value.lower().strip()
+    if User.objects.filter(email=value).exists():
+        raise serializers.ValidationError("This email is already registered.")
+    return value
+
+
+def _validate_password_strength(value: str) -> str:
+    try:
+        validate_password(value)
+    except DjangoValidationError as e:
+        raise serializers.ValidationError(list(e.messages))
+    return value
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1. REGISTRATION SERIALIZERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Step 1: Initiate (send OTP) ───────────────────────────────────────────────
+
+class _BaseInitiateRegistrationSerializer(serializers.Serializer):
+    """
+    Shared fields for all initiate-registration serializers.
+    confirm_password is validated here (step 1) so the user gets
+    feedback before waiting for an OTP.
+    """
+    first_name = serializers.CharField(max_length=75)
+    last_name  = serializers.CharField(max_length=75)
+    email            = serializers.EmailField()
+    password         = serializers.CharField(
+        min_length=8, write_only=True, style={"input_type": "password"}
     )
-    referral_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    confirm_password = serializers.CharField(
+        min_length=8, write_only=True, style={"input_type": "password"}
+    )
 
     def validate_email(self, value):
-        value = value.lower().strip()
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("This email is already registered.")
-        return value
+        return _validate_email_unique(value)
 
     def validate_password(self, value):
-        try:
-            validate_password(value)
-        except DjangoValidationError as e:
-            raise serializers.ValidationError(list(e.messages))
-        return value
+        return _validate_password_strength(value)
 
+    def validate(self, data):
+        if data["password"] != data["confirm_password"]:
+            raise serializers.ValidationError(
+                {"confirm_password": "Passwords do not match."}
+            )
+        return data
+
+
+class MaleInitiateRegistrationSerializer(_BaseInitiateRegistrationSerializer):
+    """Step 1 payload for Male registration."""
+    pass
+
+
+class FemaleInitiateRegistrationSerializer(_BaseInitiateRegistrationSerializer):
+    """Step 1 payload for Female registration."""
+    pass
+
+
+class WaliInitiateRegistrationSerializer(_BaseInitiateRegistrationSerializer):
+    """Step 1 payload for Wali registration."""
+    pass
+
+
+# ── Step 2: Verify OTP ────────────────────────────────────────────────────────
 
 class VerifyRegistrationOTPSerializer(serializers.Serializer):
-    email         = serializers.EmailField(required=True)
-    otp           = serializers.CharField(min_length=6, max_length=6, required=True)
+    """
+    Shared OTP verification serializer for all registration flows.
+    The role is determined by which view calls the service, not this serializer.
+    """
+    email = serializers.EmailField()
+    otp   = serializers.CharField(min_length=6, max_length=6)
 
     def validate_email(self, value):
         return value.lower().strip()
 
     def validate_otp(self, value):
         if not value.isdigit():
-            raise serializers.ValidationError("OTP must contain only digits.")
+            raise serializers.ValidationError("OTP must contain digits only.")
         return value
 
 
-class InitiateArtisanRegistrationSerializer(serializers.Serializer):
-    full_name = serializers.CharField(max_length=150, required=True)
-    email     = serializers.EmailField(required=True)
-    phone     = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    password  = serializers.CharField(
-        min_length=8, write_only=True, required=True,
-        style={"input_type": "password"},
-    )
+# ── Resend OTP ────────────────────────────────────────────────────────────────
 
-    def validate_email(self, value):
-        value = value.lower().strip()
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("This email is already registered.")
-        return value
-
-    def validate_password(self, value):
-        try:
-            validate_password(value)
-        except DjangoValidationError as e:
-            raise serializers.ValidationError(list(e.messages))
-        return value
-
-
-class VerifyArtisanRegistrationOTPSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
-    otp   = serializers.CharField(min_length=6, max_length=6, required=True)
+class ResendOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
 
     def validate_email(self, value):
         return value.lower().strip()
 
-    def validate_otp(self, value):
-        if not value.isdigit():
-            raise serializers.ValidationError("OTP must contain only digits.")
-        return value
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2. AUTHENTICATION SERIALIZERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════════
-# 2. Authentication
-# ═══════════════════════════════════════════════════════════════════
+class _BaseLoginSerializer(serializers.Serializer):
+    """
+    Shared login validation logic.
+    Subclasses set `allowed_roles` to restrict which role can use the endpoint.
+    """
+    email    = serializers.EmailField()
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
 
-class ClientLoginSerializer(serializers.Serializer):
-    email    = serializers.EmailField(required=True)
-    password = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
+    # Override in subclasses
+    allowed_roles: list = []
+    blocked_message: str = "This account is not accessible from this login."
 
     def validate(self, data):
         email    = data.get("email", "").lower().strip()
@@ -140,64 +174,67 @@ class ClientLoginSerializer(serializers.Serializer):
 
         if not user.check_password(password):
             raise serializers.ValidationError({"detail": "Invalid email or password."})
+
+        # Role check
+        if self.allowed_roles and user.role not in self.allowed_roles:
+            raise serializers.ValidationError({"detail": self.blocked_message})
+
+        # Account state checks
         if not user.is_active:
-            raise serializers.ValidationError({"detail": "Your account has been deactivated."})
-        if not user.is_client:
-            raise serializers.ValidationError({"detail": "Please use the artisan login."})
+            if user.deactivated_by_user:
+                raise serializers.ValidationError({
+                    "detail": (
+                        "Your account has been deactivated. "
+                        "Please contact support to reactivate it."
+                    )
+                })
+            raise serializers.ValidationError({
+                "detail": (
+                    "Your account has been blocked. "
+                    "Please contact support for assistance."
+                )
+            })
 
         data["user"] = user
         return data
 
 
-class ArtisanLoginSerializer(serializers.Serializer):
-    email    = serializers.EmailField(required=True)
-    password = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
+class MaleLoginSerializer(_BaseLoginSerializer):
+    allowed_roles   = [UserRole.MALE]
+    blocked_message = "Please use the Female or Wali login."
+
+
+class FemaleLoginSerializer(_BaseLoginSerializer):
+    allowed_roles   = [UserRole.FEMALE]
+    blocked_message = "Please use the Male or Wali login."
+
+
+class WaliLoginSerializer(_BaseLoginSerializer):
+    allowed_roles   = [UserRole.WALI]
+    blocked_message = "Please use the Male or Female login."
+
+
+class AdminLoginSerializer(_BaseLoginSerializer):
+    """
+    Shared login for both Matchmaker and Superadmin.
+    Response includes `admin_type` so the dashboard can distinguish roles.
+    """
+    allowed_roles   = [UserRole.MATCHMAKER, UserRole.SUPERADMIN]
+    blocked_message = "Admin access required."
 
     def validate(self, data):
-        email    = data.get("email", "").lower().strip()
-        password = data.get("password", "")
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            raise serializers.ValidationError({"detail": "Invalid email or password."})
-
-        if not user.check_password(password):
-            raise serializers.ValidationError({"detail": "Invalid email or password."})
-        if not user.is_active:
-            raise serializers.ValidationError({"detail": "Your account has been deactivated."})
-        if not user.is_artisan:
-            raise serializers.ValidationError({"detail": "Please use the client login."})
-
-        data["user"] = user
+        data = super().validate(data)
+        # Inject admin_type so view can include it in the response
+        data["admin_type"] = data["user"].role
         return data
 
 
-class AdminLoginSerializer(serializers.Serializer):
-    email    = serializers.EmailField(required=True)
-    password = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
-
-    def validate(self, data):
-        from django.contrib.auth import authenticate
-        user = authenticate(
-            request=self.context.get("request"),
-            email=data["email"].lower().strip(),
-            password=data["password"],
-        )
-        if not user:
-            raise serializers.ValidationError({"detail": "Invalid credentials."})
-        if not user.is_active:
-            raise serializers.ValidationError({"detail": "Account deactivated."})
-        if not user.is_admin:
-            raise serializers.ValidationError({"detail": "Admin access required."})
-        data["user"] = user
-        return data
-
+# ── Password management ───────────────────────────────────────────────────────
 
 class ChangePasswordSerializer(serializers.Serializer):
-    old_password         = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
-    new_password         = serializers.CharField(write_only=True, min_length=8, required=True, style={"input_type": "password"})
-    confirm_new_password = serializers.CharField(write_only=True, min_length=8, required=True, style={"input_type": "password"})
+    old_password         = serializers.CharField(write_only=True, style={"input_type": "password"})
+    new_password         = serializers.CharField(write_only=True, min_length=8, style={"input_type": "password"})
+    confirm_new_password = serializers.CharField(write_only=True, min_length=8, style={"input_type": "password"})
 
     def validate_old_password(self, value):
         if not self.context["request"].user.check_password(value):
@@ -206,9 +243,13 @@ class ChangePasswordSerializer(serializers.Serializer):
 
     def validate(self, data):
         if data["new_password"] != data["confirm_new_password"]:
-            raise serializers.ValidationError({"confirm_new_password": "Passwords do not match."})
+            raise serializers.ValidationError(
+                {"confirm_new_password": "Passwords do not match."}
+            )
         if data["new_password"] == data["old_password"]:
-            raise serializers.ValidationError({"new_password": "New password must differ from the current one."})
+            raise serializers.ValidationError(
+                {"new_password": "New password must differ from the current one."}
+            )
         try:
             validate_password(data["new_password"], self.context["request"].user)
         except DjangoValidationError as e:
@@ -232,7 +273,7 @@ class VerifyPasswordResetOTPSerializer(serializers.Serializer):
 
     def validate_otp(self, value):
         if not value.isdigit():
-            raise serializers.ValidationError("OTP must contain only digits.")
+            raise serializers.ValidationError("OTP must contain digits only.")
         return value
 
 
@@ -243,7 +284,9 @@ class ResetPasswordSerializer(serializers.Serializer):
 
     def validate(self, data):
         if data["new_password"] != data["confirm_new_password"]:
-            raise serializers.ValidationError({"confirm_new_password": "Passwords do not match."})
+            raise serializers.ValidationError(
+                {"confirm_new_password": "Passwords do not match."}
+            )
         try:
             validate_password(data["new_password"])
         except DjangoValidationError as e:
@@ -251,14 +294,87 @@ class ResetPasswordSerializer(serializers.Serializer):
         return data
 
 
-# ═══════════════════════════════════════════════════════════════════
-# 3. OAuth
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. OAUTH SERIALIZERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class GoogleOAuthSerializer(serializers.Serializer):
-    """Accepts Firebase/Google ID token from the mobile app."""
-    id_token  = serializers.CharField(required=True)
-    role      = serializers.ChoiceField(choices=["client", "artisan"], default="client")
+class _BaseOAuthSerializer(serializers.Serializer):
+    """
+    Shared OAuth logic.
+    `role` must be one of: male, female, wali.
+    Admins cannot register via OAuth.
+    """
+    id_token = serializers.CharField()
+    role     = serializers.ChoiceField(
+        choices=[UserRole.MALE, UserRole.FEMALE, UserRole.WALI],
+        default=UserRole.MALE,
+    )
+
+    def _get_or_create_user(self, email: str, first_name: str, last_name: str, provider: str, provider_id: str, role: str):
+        """
+        Get existing user or create a new one via OAuth.
+        Raises ValidationError if email is registered via a different provider.
+        """
+        # Determine gender from role
+        gender_map = {
+            UserRole.MALE:   Gender.MALE,
+            UserRole.FEMALE: Gender.FEMALE,
+            UserRole.WALI:   None,  # Wali sets gender during onboarding
+        }
+
+        existing = User.objects.filter(email=email).first()
+        if existing:
+            if existing.provider == AuthProvider.SELF:
+                raise serializers.ValidationError(
+                    "An account with this email exists. Please log in with email and password."
+                )
+            if existing.provider != provider:
+                raise serializers.ValidationError(
+                    f"An account with this email exists via {existing.provider}. Please use that login."
+                )
+            return existing, False
+
+        user = User.objects.create(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            role=role,
+            gender=gender_map.get(role),
+            is_active=True,
+            provider=provider,
+            provider_id=provider_id,
+        )
+        user.set_unusable_password()
+        user.codename = self._assign_codename(user)
+        user.save(update_fields=["codename"])
+        UserSettings.objects.create(user=user)
+        return user, True
+
+    @staticmethod
+    def _assign_codename(user) -> str:
+        from .models import generate_codename
+        codename = generate_codename()
+        # Ensure uniqueness
+        while User.objects.filter(codename=codename).exists():
+            codename = f"MMK{User.objects.count() + 1:04d}"
+        return codename
+
+    def _post_registration_hooks(self, user):
+        try:
+            from users.tasks import send_welcome_email
+            send_welcome_email.delay(user.email, user.first_name)
+            from notifications.services import NotificationTemplates
+            NotificationTemplates.welcome(user)
+            NotificationTemplates.new_user_joined(user)
+        except Exception as exc:
+            logger.error("OAuth post-registration hooks failed for %s: %s", user.email, exc)
+
+
+class GoogleOAuthSerializer(_BaseOAuthSerializer):
+    """
+    Accepts a Google ID token from the mobile app (Firebase or direct Google Sign-In).
+    Creates the account on first call; logs in on subsequent calls.
+    """
 
     def validate(self, attrs):
         token = attrs["id_token"]
@@ -277,203 +393,356 @@ class GoogleOAuthSerializer(serializers.Serializer):
         if not email:
             raise serializers.ValidationError("Google account has no associated email.")
 
-        is_staff     = role == "artisan"
-        is_superuser = False
-
-        user, created = User.objects.get_or_create(
+        user, created = self._get_or_create_user(
             email=email,
-            defaults={
-                "full_name":    google_user.get("name", ""),
-                "is_active":    True,
-                "is_staff":     is_staff,
-                "is_superuser": is_superuser,
-                "provider":     AuthProvider.GOOGLE,
-                "provider_id":  google_user.get("sub"),
-            },
+            first_name=google_user.get("given_name", ""),
+            last_name=google_user.get("family_name", ""),
+            provider=AuthProvider.GOOGLE,
+            provider_id=google_user.get("sub", ""),
+            role=role,
         )
 
         if created:
-            user.set_unusable_password()
-            picture = google_user.get("picture", "")
-            if picture:
+            # Attempt to download Google profile picture
+            picture_url = google_user.get("picture", "")
+            if picture_url:
                 try:
-                    resp = req.get(picture, timeout=5)
+                    resp = req.get(picture_url, timeout=5)
                     resp.raise_for_status()
                     user.profile_picture.save(
                         f"{user.id}_google.jpg",
                         ContentFile(resp.content),
-                        save=False,
+                        save=True,
                     )
                 except Exception:
                     pass
-            user.save()
+            self._post_registration_hooks(user)
 
-            self._send_post_registration_notifications(user)
-
-        if not created:
-            if user.provider == AuthProvider.SELF:
-                raise serializers.ValidationError(
-                    "An account with this email already exists. Please log in with email and password."
-                )
-            if user.provider != AuthProvider.GOOGLE:
-                raise serializers.ValidationError(
-                    f"An account with this email exists via {user.provider}. Please use that login method."
-                )
-
-        refresh = RefreshToken.for_user(user)
-        return {
-            "user":   _build_user_data(user),
-            "tokens": {"refresh": str(refresh), "access": str(refresh.access_token)},
-        }
-
-    @staticmethod
-    def _send_post_registration_notifications(user):
-        try:
-            from users.tasks import send_welcome_email
-            send_welcome_email.delay(user.email, user.full_name)
-            from notifications.services import NotificationTemplates
-            NotificationTemplates.welcome(user)
-            if user.is_client:
-                NotificationTemplates.new_user_joined(user)
-            else:
-                NotificationTemplates.new_artisan_registered(user)
-        except Exception as exc:
-            logger.error("Post-registration notifications failed: %s", exc)
+        return {"message": "Login successful.", **_build_token_data(user)}
 
 
-class AppleOAuthSerializer(serializers.Serializer):
-    id_token  = serializers.CharField(required=True)
-    user      = serializers.JSONField(required=False)
-    role      = serializers.ChoiceField(choices=["client", "artisan"], default="client")
+class AppleOAuthSerializer(_BaseOAuthSerializer):
+    """
+    Accepts an Apple ID token from the mobile app.
+    `user` dict is optional — Apple only sends it on the very first login.
+    """
+    user = serializers.JSONField(required=False)
 
     def validate(self, attrs):
         id_token_value = attrs["id_token"]
         user_data      = attrs.get("user", {})
         role           = attrs["role"]
 
-        apple_keys = req.get("https://appleid.apple.com/auth/keys", timeout=10).json()
-        header     = jwt.get_unverified_header(id_token_value)
-        key        = next(k for k in apple_keys["keys"] if k["kid"] == header["kid"])
-        public_key = RSAAlgorithm.from_jwk(key)
+        try:
+            apple_keys = req.get("https://appleid.apple.com/auth/keys", timeout=10).json()
+            header     = jwt.get_unverified_header(id_token_value)
+            key        = next(k for k in apple_keys["keys"] if k["kid"] == header["kid"])
+            public_key = RSAAlgorithm.from_jwk(key)
 
-        payload = jwt.decode(
-            id_token_value,
-            public_key,
-            algorithms=["RS256"],
-            audience=settings.APPLE_CLIENT_ID,
-        )
+            payload = jwt.decode(
+                id_token_value,
+                public_key,
+                algorithms=["RS256"],
+                audience=settings.APPLE_CLIENT_ID,
+            )
+        except StopIteration:
+            raise serializers.ValidationError("Apple public key not found.")
+        except Exception:
+            raise serializers.ValidationError("Invalid or expired Apple token.")
 
         email       = payload.get("email")
         provider_id = payload.get("sub")
-        full_name   = user_data.get("name") if user_data else (email or "").split("@")[0]
+        first_name = (
+            user_data.get("name", {}).get("firstName", "")
+            if isinstance(user_data.get("name"), dict)
+            else (email or "").split("@")[0]
+        )
+        last_name = (
+            user_data.get("name", {}).get("lastName", "")
+            if isinstance(user_data.get("name"), dict)
+            else ""
+        )
 
         if not email:
             raise serializers.ValidationError("Apple account has no associated email.")
 
-        is_staff = role == "artisan"
-
-        user, created = User.objects.get_or_create(
+        user, created = self._get_or_create_user(
             email=email,
-            defaults={
-                "full_name":    full_name,
-                "is_active":    True,
-                "is_staff":     is_staff,
-                "is_superuser": False,
-                "provider":     AuthProvider.APPLE,
-                "provider_id":  provider_id,
-            },
+            first_name=first_name,
+            last_name=last_name,
+            provider=AuthProvider.APPLE,
+            provider_id=provider_id,
+            role=role,
         )
 
         if created:
-            user.set_unusable_password()
-            user.save()
-            try:
-                from users.tasks import send_welcome_email
-                send_welcome_email.delay(user.email, user.full_name)
-                from notifications.services import NotificationTemplates
-                NotificationTemplates.welcome(user)
-                if user.is_client:
-                    NotificationTemplates.new_user_joined(user)
-                else:
-                    NotificationTemplates.new_artisan_registered(user)
-            except Exception as exc:
-                logger.error("Apple OAuth post-registration failed: %s", exc)
+            self._post_registration_hooks(user)
 
-        if not created:
-            if user.provider == AuthProvider.SELF:
-                raise serializers.ValidationError(
-                    "An account with this email exists. Please log in with email and password."
-                )
-            if user.provider != AuthProvider.APPLE:
-                raise serializers.ValidationError(
-                    f"Please log in with {user.provider}."
-                )
-
-        refresh = RefreshToken.for_user(user)
-        return {
-            "user":   _build_user_data(user),
-            "tokens": {"refresh": str(refresh), "access": str(refresh.access_token)},
-        }
+        return {"message": "Login successful.", **_build_token_data(user)}
 
 
-# ═══════════════════════════════════════════════════════════════════
-# 4. Profile serializers
-# ═══════════════════════════════════════════════════════════════════
-
-class UserMinimalSerializer(serializers.ModelSerializer):
-    """Minimal public-safe representation used in nested contexts."""
-    class Meta:
-        model  = User
-        fields = ["id", "full_name", "email", "profile_picture", "role"]
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4. PROFILE SERIALIZERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    """Full profile — role determines which nested profile is included."""
-    role            = serializers.CharField(read_only=True)
+    """
+    Full profile for the authenticated user (Male, Female, or Wali).
+
+    Hidden fields (first_name, last_name, profile_picture) are visible to the owner.
+    When viewed by others, the matches app serializer controls visibility
+    based on mutual interest — this serializer is owner-only.
+    """
+    last_active_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
         fields = [
-            "id", "full_name", "email", "phone", "profile_picture",
-            "birth_date", "role", "provider",
-            "created_at",
-        ]
-        read_only_fields = ["id", "role", "provider", "created_at"]
-
-
-
-
-class AdminProfileSerializer(serializers.ModelSerializer):
-
-    profile_picture = serializers.ImageField(required=False)
-
-    class Meta:
-        model = User
-        fields = [
             "id",
-            "full_name",
+            "codename",
+            "first_name",
+            "last_name",
             "email",
+            "role",
+            "gender",
             "profile_picture",
-            "phone",
+            "subscription_plan",
+            "subscription_start",
+            "subscription_end",
+            "provider",
+            "is_active",
+            "last_active",
+            "last_active_display",
             "created_at",
             "updated_at",
+        ]
+        read_only_fields = [
+            "id", "codename", "email", "role", "gender",
+            "subscription_plan", "subscription_start", "subscription_end",
+            "provider", "is_active", "last_active", "last_active_display",
+            "created_at", "updated_at",
         ]
 
-        read_only_fields = [
-            "id",
-            "email",
-            "created_at",
-            "updated_at",
-        ]
+    def get_last_active_display(self, obj) -> str | None:
+        """Returns human-readable last active string."""
+        if not obj.last_active:
+            return None
+        from django.utils import timezone
+        delta = timezone.now() - obj.last_active
+        seconds = int(delta.total_seconds())
+        if seconds < 60:
+            return "Active now"
+        if seconds < 3600:
+            minutes = seconds // 60
+            return f"Active {minutes} min{'s' if minutes > 1 else ''} ago"
+        if seconds < 86400:
+            hours = seconds // 3600
+            return f"Active {hours} hr{'s' if hours > 1 else ''} ago"
+        days = seconds // 86400
+        return f"Active {days} day{'s' if days > 1 else ''} ago"
 
     def to_representation(self, instance):
-        representation = super().to_representation(instance)
-
+        rep = super().to_representation(instance)
         request = self.context.get("request")
-
         if instance.profile_picture and request:
-            representation["profile_picture"] = request.build_absolute_uri(
-                instance.profile_picture.url
-            )
+            rep["profile_picture"] = request.build_absolute_uri(instance.profile_picture.url)
+        return rep
 
-        return representation
+
+class UpdateProfileSerializer(serializers.ModelSerializer):
+    """
+    Writable fields a user can update on their own profile.
+    Role, email, codename, and subscription are not user-editable here.
+    """
+    class Meta:
+        model  = User
+        fields = ["first_name", "last_name", "device_token"]
+
+
+class UpdateProfilePictureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = User
+        fields = ["profile_picture"]
+
+
+class PublicUserProfileSerializer(serializers.ModelSerializer):
+    """
+    Profile representation shown to OTHER users browsing the directory.
+    Sensitive fields (first_name, last_name, profile_picture, email) are conditionally
+    hidden — resolved by the view based on mutual interest status.
+
+    The view should call `set_visibility(has_mutual_interest=True/False)`
+    before returning, or pass `mutual_interest` in serializer context.
+    """
+    display_name        = serializers.SerializerMethodField()
+    display_picture     = serializers.SerializerMethodField()
+    last_active_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = User
+        fields = [
+            "id",
+            "codename",
+            "display_name",
+            "display_picture",
+            "role",
+            "gender",
+            "subscription_plan",
+            "last_active",
+            "last_active_display",
+        ]
+
+    def _has_mutual_interest(self) -> bool:
+        return self.context.get("mutual_interest", False)
+
+    def get_display_name(self, obj) -> str:
+        """Returns first_name and last_name only after mutual interest; codename otherwise."""
+        if self._has_mutual_interest():
+            return f"{obj.first_name} {obj.last_name}"
+        return obj.codename
+
+    def get_display_picture(self, obj) -> str | None:
+        """
+        Returns the profile picture URL after mutual interest.
+        Before mutual interest, returns None — frontend handles blur effect.
+        """
+        if not self._has_mutual_interest():
+            return None
+        if obj.profile_picture:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.profile_picture.url)
+            return obj.profile_picture.url
+        return None
+
+    def get_last_active_display(self, obj) -> str | None:
+        if not obj.last_active:
+            return None
+        from django.utils import timezone
+        delta   = timezone.now() - obj.last_active
+        seconds = int(delta.total_seconds())
+        if seconds < 60:
+            return "Active now"
+        if seconds < 3600:
+            return f"Active {seconds // 60} min(s) ago"
+        if seconds < 86400:
+            return f"Active {seconds // 3600} hr(s) ago"
+        return f"Active {seconds // 86400} day(s) ago"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5. ADMIN SERIALIZERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AdminProfileSerializer(serializers.ModelSerializer):
+    """Admin's own profile — read/update."""
+    member_since = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model  = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "email",
+            "role",
+            "profile_picture",
+            "member_since",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "email", "role", "member_since", "created_at", "updated_at"]
+
+    def to_representation(self, instance):
+        rep     = super().to_representation(instance)
+        request = self.context.get("request")
+        if instance.profile_picture and request:
+            rep["profile_picture"] = request.build_absolute_uri(instance.profile_picture.url)
+        return rep
+
+
+class CreateMatchmakerSerializer(serializers.Serializer):
+    """Used by Superadmin to create a new Matchmaker account."""
+    first_name = serializers.CharField(max_length=75)
+    last_name  = serializers.CharField(max_length=75)
+    email     = serializers.EmailField()
+    password  = serializers.CharField(min_length=8, write_only=True, style={"input_type": "password"})
+
+    def validate_email(self, value):
+        return _validate_email_unique(value)
+
+    def validate_password(self, value):
+        return _validate_password_strength(value)
+
+
+class MatchmakerDetailSerializer(serializers.ModelSerializer):
+    """Read representation of a Matchmaker account."""
+    class Meta:
+        model  = User
+        fields = [
+            "id", "first_name", "last_name", "email", "role",
+            "profile_picture", "is_active", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ChangeMatchmakerRoleSerializer(serializers.Serializer):
+    """Superadmin can promote/demote between matchmaker and superadmin."""
+    role = serializers.ChoiceField(choices=[UserRole.MATCHMAKER, UserRole.SUPERADMIN])
+
+
+class AdminUserListSerializer(serializers.ModelSerializer):
+    """
+    Compact user representation for admin user list view.
+    Used in admin dashboard to list/search/filter all users.
+    """
+    last_active_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = User
+        fields = [
+            "id",
+            "codename",
+            "first_name",
+            "last_name",
+            "email",
+            "role",
+            "gender",
+            "subscription_plan",
+            "is_active",
+            "deactivated_by_user",
+            "last_active",
+            "last_active_display",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_last_active_display(self, obj) -> str | None:
+        if not obj.last_active:
+            return None
+        from django.utils import timezone
+        delta   = timezone.now() - obj.last_active
+        seconds = int(delta.total_seconds())
+        if seconds < 60:
+            return "Active now"
+        if seconds < 3600:
+            return f"Active {seconds // 60} min(s) ago"
+        if seconds < 86400:
+            return f"Active {seconds // 3600} hr(s) ago"
+        return f"Active {seconds // 86400} day(s) ago"
+
+
+class AdminBlockUserSerializer(serializers.Serializer):
+    """Payload for admin blocking/unblocking a user."""
+    is_active = serializers.BooleanField()
+    reason    = serializers.CharField(required=False, allow_blank=True)
+
+
+class DeactivateAccountSerializer(serializers.Serializer):
+    """User self-deactivation."""
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+    def validate_password(self, value):
+        if not self.context["request"].user.check_password(value):
+            raise serializers.ValidationError("Incorrect password.")
+        return value
