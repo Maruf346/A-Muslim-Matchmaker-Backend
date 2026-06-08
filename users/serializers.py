@@ -353,11 +353,7 @@ class _BaseOAuthSerializer(serializers.Serializer):
     @staticmethod
     def _assign_codename(user) -> str:
         from .models import generate_codename
-        codename = generate_codename()
-        # Ensure uniqueness
-        while User.objects.filter(codename=codename).exists():
-            codename = f"MMK{User.objects.count() + 1:04d}"
-        return codename
+        return generate_codename(role=user.role)
 
     def _post_registration_hooks(self, user):
         try:

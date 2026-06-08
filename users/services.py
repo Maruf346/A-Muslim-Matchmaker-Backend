@@ -185,9 +185,8 @@ class RegistrationService:
         )
 
         # Assign unique codename
-        codename = generate_codename()
-        while User.objects.filter(codename=codename).exclude(pk=user.pk).exists():
-            codename = f"MMK{User.objects.count():04d}"
+        from .models import generate_codename
+        codename = generate_codename(role=role_map[role])
         user.codename = codename
         user.save(update_fields=["codename"])
 

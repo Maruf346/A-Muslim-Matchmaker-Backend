@@ -126,15 +126,47 @@ class UserManager(BaseUserManager):
 # Codename Generator
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_codename() -> str:
+def generate_codename(role: str) -> str:
     """
-    Generate a unique sequential codename in the format MMK0001.
-    Called once at registration-complete time and stored permanently.
-    Uses DB count to determine the next number — safe for low-concurrency
-    registration. For high-concurrency, replace with a DB sequence.
+    Generate a unique sequential codename based on role.
+
+    Format:
+        Male  → B-1, B-2, ... B-238 (no zero-padding, no fixed digit length)
+        Female → S-1, S-2, ... S-460
+        Wali  → W-1, W-2, ... W-99
+
+    No fixed digit width — numbers grow naturally (B-9999, B-10000 etc.).
+    Existing legacy users may have non-standard formats (e.g. B-29, S-3)
+    which is fine since codename is a free CharField.
+
+    Only generated for MALE, FEMALE, WALI roles.
+    Admins (MATCHMAKER, SUPERADMIN) do not get codenames.
     """
-    count = User.objects.count() + 1
-    return f"MMK{count:04d}"
+    prefix_map = {
+        UserRole.MALE:   "B",
+        UserRole.FEMALE: "S",
+        UserRole.WALI:   "W",
+    }
+
+    prefix = prefix_map.get(role)
+    if not prefix:
+        return None  # Admins get no codename
+
+    # Find the highest existing number for this prefix
+    import re
+    existing = (
+        User.objects
+        .filter(codename__startswith=f"{prefix}-")
+        .values_list("codename", flat=True)
+    )
+
+    max_num = 0
+    for codename in existing:
+        match = re.match(rf"^{prefix}-(\d+)$", codename)
+        if match:
+            max_num = max(max_num, int(match.group(1)))
+
+    return f"{prefix}-{max_num + 1}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
