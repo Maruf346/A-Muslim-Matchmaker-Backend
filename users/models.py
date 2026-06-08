@@ -35,7 +35,6 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 
-from users import serializers
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,8 +200,8 @@ class User(AbstractUser):
     # ── Core identity ─────────────────────────────────────────────────────────
     email     = models.EmailField(unique=True, verbose_name=_("Email Address"))
     # full_name = models.CharField(max_length=150, blank=True, verbose_name=_("Full Name"))
-    first_name = serializers.CharField(max_length=75)
-    last_name  = serializers.CharField(max_length=75)
+    first_name = models.CharField(max_length=75)
+    last_name  = models.CharField(max_length=75)
     codename  = models.CharField(
         max_length=20,
         unique=True,
