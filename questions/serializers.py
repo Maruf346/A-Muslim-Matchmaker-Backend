@@ -18,6 +18,7 @@ Design notes:
     • UserPhoto serializer handles multiple photo uploads.
 """
 
+from attr import fields
 from rest_framework import serializers
 
 from .choices import *
@@ -148,7 +149,7 @@ class MaleBasicInfoSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "completion_percentage", "age", "photos", "created_at", "updated_at"]
-        extra_kwargs = {f: {"required": False, "allow_null": True} for f in fields if f not in read_only_fields}
+        extra_kwargs = {f: {"required": False, "allow_null": True} for f in set(fields) - set(read_only_fields)}
 
     def get_completion_percentage(self, obj) -> int:
         return obj.completion_percentage
@@ -241,7 +242,7 @@ class FemaleBasicInfoSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "completion_percentage", "age", "photos", "created_at", "updated_at"]
-        extra_kwargs = {f: {"required": False, "allow_null": True} for f in fields if f not in read_only_fields}
+        extra_kwargs = {f: {"required": False, "allow_null": True} for f in set(fields) - set(read_only_fields)}
 
     def get_completion_percentage(self, obj) -> int:
         return obj.completion_percentage
@@ -309,7 +310,7 @@ class WaliProfileSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "completion_percentage", "created_at", "updated_at"]
-        extra_kwargs = {f: {"required": False, "allow_null": True} for f in fields if f not in read_only_fields}
+        extra_kwargs = {f: {"required": False, "allow_null": True} for f in set(fields) - set(read_only_fields)}
 
     def get_completion_percentage(self, obj) -> int:
         return obj.completion_percentage
@@ -360,7 +361,7 @@ class WaliBasicInfoSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "completion_percentage", "age", "photos", "created_at", "updated_at"]
-        extra_kwargs = {f: {"required": False, "allow_null": True} for f in fields if f not in read_only_fields}
+        extra_kwargs = {f: {"required": False, "allow_null": True} for f in set(fields) - set(read_only_fields)}
 
     def get_completion_percentage(self, obj) -> int:
         return obj.completion_percentage
