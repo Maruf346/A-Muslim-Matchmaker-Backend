@@ -13,6 +13,7 @@ urlpatterns = [
     # Include app-specific URL configurations
     path('user/', include('users.urls')),
     path('notification/', include('notifications.urls')),
+    path("questions/",    include("questions.urls")),
 
     #JWT endpoints
     # path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
