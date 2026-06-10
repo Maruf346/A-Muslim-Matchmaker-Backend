@@ -111,3 +111,25 @@ class Feedback(models.Model):
         verbose_name_plural = 'Feedbacks'
         ordering = ['-created_at']
 
+
+class PrivacyHeader(models.Model):
+    """
+    Private model to store the header text for the Privacy Policy section in the app.
+    Singleton model - only one instance should exist.
+    """
+    title = models.CharField(max_length=200, default='Privacy Policy')
+    subtitle = models.CharField(max_length=500, default='Your privacy is important to us.')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Privacy Header'
+        verbose_name_plural = 'Privacy Headers'
+
+    def save(self, *args, **kwargs):
+        # Singleton
+        if not self.pk and PrivacyHeader.objects.exists():
+            raise ValidationError("Only one Privacy Header instance allowed.")
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title

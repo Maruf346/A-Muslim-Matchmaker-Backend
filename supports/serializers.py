@@ -79,3 +79,19 @@ class FeedbackAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
         
         
+class PrivacyHeaderPublicSerializer(serializers.ModelSerializer):
+    """Used to return only the content of the Privacy Header for public view"""
+
+    class Meta:
+        model = PrivacyHeader
+        fields = ['title', 'subtitle']
+        read_only_fields = ['title', 'subtitle']
+        
+        
+class PrivacyHeaderAdminSerializer(serializers.ModelSerializer):
+    """Used by admin to update the Privacy Header content"""
+
+    class Meta:
+        model = PrivacyHeader
+        fields = ['title', 'subtitle', 'updated_at']
+        read_only_fields = ['updated_at']

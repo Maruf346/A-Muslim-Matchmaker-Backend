@@ -216,3 +216,34 @@ class FeedbackAdminViewSet(viewsets.ModelViewSet):
     queryset = Feedback.objects.all()
     serializer_class = FeedbackAdminSerializer
     permission_classes = [IsAdmin]
+    
+    
+@extend_schema(
+    tags=['Supports - Shared'],
+    summary="Get Privacy Header",
+    description="Retrieve the Privacy Header content for public or authenticated users."
+)
+class PrivacyHeaderPublicView(RetrieveAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PrivacyHeaderPublicSerializer
+    
+    def get_object(self):
+        return PrivacyHeader.objects.first()
+    
+    
+@extend_schema(
+    tags=['Supports - Admin'],
+    summary="Update Privacy Header",
+    description="Admin can update the Privacy Header content. Only PATCH requests are allowed."
+)
+class PrivacyHeaderAdminView(UpdateAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = PrivacyHeaderAdminSerializer
+    http_method_names = ['patch']
+    
+    def get_object(self):
+        return PrivacyHeader.objects.first()
+    
+    def perform_update(self, serializer):
+        serializer.save()
+        logger.info('Privacy Header updated')

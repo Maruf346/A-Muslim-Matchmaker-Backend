@@ -28,4 +28,8 @@ urlpatterns = [
     # Feedback
     path('feedback/submit/', FeedbackCreateView.as_view(), name='submit-feedback'),
     path('feedback/my-feedbacks/', UserFeedbackListView.as_view(), name='my-feedbacks'),
+    
+    # Privacy Header
+    path('privacy-header/', PrivacyHeaderPublicView.as_view(), name='privacy-header-public'),
+    path('admin/privacy-header/', PrivacyHeaderAdminView.as_view(), name='privacy-header-admin'),
 ]

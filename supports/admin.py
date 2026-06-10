@@ -66,3 +66,8 @@ class FeedbackAdmin(admin.ModelAdmin):
     search_fields = ("email", "subject", "message")
     readonly_fields = ("id", "created_at", "updated_at")
     ordering = ("-created_at",)
+    
+    
+@admin.register(PrivacyHeader)
+class PrivacyHeaderAdmin(SingletonAdmin):
+    pass
