@@ -15,14 +15,14 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.shortcuts import get_object_or_404
 
-from users.permissions import IsAdmin
+from users.permissions import IsAdminUser
 
 
 
 logger = logging.getLogger(__name__)
 
 
-@extend_schema(tags=["Supports - Client/Artisan"])
+@extend_schema(tags=["Supports - Shared"])
 @extend_schema_view(
     list=extend_schema(
         summary="List FAQs",
@@ -85,7 +85,7 @@ class FAQViewSet(viewsets.ModelViewSet):
     
 
 @extend_schema(
-    tags=['Supports - Client/Artisan'],
+    tags=['Supports - Shared'],
     summary="Get About Us content",
     description="Retrieve the About Us information for public or authenticated users."
 )
@@ -116,7 +116,7 @@ class AboutUsAdminUpdateView(UpdateAPIView):
         
         
 @extend_schema(
-    tags=['Supports - Client/Artisan'],
+    tags=['Supports - Shared'],
     summary="Get Terms and Conditions",
     description="Retrieve the Terms and Conditions content for public or authenticated users."
 )
@@ -148,7 +148,7 @@ class TermsAndConditionsAdminUpdateView(UpdateAPIView):
 
 
 @extend_schema(
-    tags=['Supports - Client/Artisan'],
+    tags=['Supports - Shared'],
     summary="Get Privacy Policy",
     description="Retrieve the Privacy Policy content for public or authenticated users."
 )
@@ -179,12 +179,12 @@ class PrivacyPolicyAdminUpdateView(UpdateAPIView):
         
 
 @extend_schema(
-    tags=['Supports - Client/Artisan'],
+    tags=['Supports - Shared'],
     summary="Submit Feedback",
-    description="Users (client/artisan) can submit feedback about the platform."
+    description="Users (Male/Female/Wali) can submit feedback about the platform."
 )
 class FeedbackCreateView(generics.CreateAPIView):
-    """Users (client/artisan) submit feedback"""
+    """Users (Male/Female/Wali) submit feedback"""
     serializer_class = FeedbackCreateSerializer
     permission_classes = [IsAuthenticated]
 
@@ -193,7 +193,7 @@ class FeedbackCreateView(generics.CreateAPIView):
 
 
 @extend_schema(
-    tags=['Supports - Client/Artisan'],
+    tags=['Supports - Shared'],
     summary="List User Feedback",
     description="Users can view a list of their own feedback submissions."
 )
@@ -215,7 +215,7 @@ class FeedbackAdminViewSet(viewsets.ModelViewSet):
     """Admin can CRUD all feedbacks"""
     queryset = Feedback.objects.all()
     serializer_class = FeedbackAdminSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsAdminUser]
     
     
 @extend_schema(

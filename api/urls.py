@@ -14,6 +14,7 @@ urlpatterns = [
     path('user/', include('users.urls')),
     path('notification/', include('notifications.urls')),
     path("questions/",    include("questions.urls")),
+    path('supports/', include('supports.urls')),
 
     #JWT endpoints
     # path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
