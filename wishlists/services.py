@@ -18,7 +18,7 @@ import logging
 
 from django.db.models import Q
 
-from .models import BlockedProfile, HiddenProfile, ProfileView, Report, SavedProfile
+from .models import *
 
 logger = logging.getLogger(__name__)
 

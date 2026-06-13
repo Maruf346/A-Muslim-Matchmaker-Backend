@@ -25,22 +25,8 @@ from rest_framework.views import APIView
 from users.permissions import IsAdminUser, IsNormalUser
 
 from .models import BlockedProfile, HiddenProfile, ProfileView, Report, SavedProfile
-from .serializers import (
-    AdminReportDetailSerializer,
-    AdminReportListSerializer,
-    AdminReportUpdateSerializer,
-    BlockedProfileListSerializer,
-    BlockToggleResponseSerializer,
-    CreateReportSerializer,
-    HiddenProfileListSerializer,
-    HideToggleResponseSerializer,
-    ProfileViewListSerializer,
-    ReportCreateResponseSerializer,
-    SavedProfileListSerializer,
-    SaveToggleResponseSerializer,
-    ToggleTargetSerializer,
-)
-from .services import BlockService, HideService, ReportService, SavedProfileService
+from .serializers import *
+from .services import *
 
 logger = logging.getLogger(__name__)
 User = get_user_model()

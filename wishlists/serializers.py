@@ -12,7 +12,7 @@ from rest_framework import serializers
 
 from matches.serializers import DirectoryProfileSerializer
 
-from .models import BlockedProfile, HiddenProfile, ProfileView, Report, ReportReason, ReportStatus, SavedProfile
+from .models import *
 
 
 # ─────────────────────────────────────────────────────────────────────────────
