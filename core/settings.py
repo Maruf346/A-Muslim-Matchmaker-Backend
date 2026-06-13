@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'questions',
     'supports',
     'matches',
+    'wishlists',
 ]
 
 MIDDLEWARE = [

@@ -1,5 +1,11 @@
+"""
+wishlists/apps.py
+"""
+
 from django.apps import AppConfig
 
 
 class WishlistsConfig(AppConfig):
-    name = 'wishlists'
+    default_auto_field = "django.db.models.BigAutoField"
+    name               = "wishlists"
+    verbose_name       = "Wishlists & Safety"
