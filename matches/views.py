@@ -31,11 +31,12 @@ from rest_framework.views import APIView
 from questions.models import FemaleBasicInfo, MaleBasicInfo, WaliBasicInfo
 from users.models import UserRole
 from users.permissions import IsAdminUser, IsFemaleUser, IsMaleUser, IsNormalUser, IsWaliUser
+from wishlists.services import ProfileViewService, VisibilityService
 
 from .models import Match, MatchStatus
 from .permissions import CanSendConnectionRequest, IsParticipantInMatch
 from .serializers import *
-from .services import *
+from .services import MatchService, SubscriptionLimitService
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -126,6 +127,11 @@ class DirectoryListView(APIView):
         roles = _opposite_gender_roles(request.user)
         qs = User.objects.filter(role__in=roles, is_active=True).exclude(id=request.user.id)
 
+        # ── exclude blocked / hidden / reported profiles ─────────────────────
+        excluded_ids = VisibilityService.get_excluded_user_ids(request.user)
+        if excluded_ids:
+            qs = qs.exclude(id__in=excluded_ids)
+
         # ── online / new filters ─────────────────────────────────────────────
         if request.query_params.get("online") == "true":
             cutoff = timezone.now() - timedelta(minutes=5)
@@ -184,6 +190,49 @@ class DirectoryListView(APIView):
 
         serializer = DirectoryProfileSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Matches - Directory"])
+class DirectoryProfileDetailView(APIView):
+    """
+    GET — View a single profile from the directory by User UUID.
+    Records a ProfileView entry. Photos remain blurred (no mutual interest).
+    Available to: Male, Female, Wali (opposite gender only).
+    """
+    permission_classes = [IsNormalUser]
+
+    @extend_schema(
+        summary="View a single directory profile",
+        description=(
+            "Returns the directory-style profile card for a specific user and "
+            "records a `ProfileView` entry (used for the 'who viewed me' feature). "
+            "Only opposite-gender profiles are accessible. Blocked/hidden/reported "
+            "profiles return 404."
+        ),
+        responses={
+            200: DirectoryProfileSerializer,
+            404: OpenApiResponse(description="Profile not found or not accessible."),
+        },
+    )
+    def get(self, request, user_id):
+        roles = _opposite_gender_roles(request.user)
+        try:
+            target = User.objects.get(id=user_id, role__in=roles, is_active=True)
+        except User.DoesNotExist:
+            return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not VisibilityService.can_view_profile(request.user, target):
+            return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            ProfileViewService.record_view(viewer=request.user, viewed_user=target)
+        except Exception:
+            logger.exception("Failed to record profile view for user %s", target.id)
+
+        return Response(
+            DirectoryProfileSerializer(target, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -462,6 +511,13 @@ class MatchDetailView(APIView):
         if not match:
             return Response({"error": "Match not found."}, status=status.HTTP_404_NOT_FOUND)
         self.check_object_permissions(request, match)
+
+        # Record that this user viewed the other party's profile
+        other_party = match.other_party(request.user)
+        try:
+            ProfileViewService.record_view(viewer=request.user, viewed_user=other_party)
+        except Exception:
+            logger.exception("Failed to record profile view for match %s", match.id)
 
         return Response(
             MatchDetailSerializer(match, context={"request": request}).data,

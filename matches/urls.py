@@ -51,6 +51,7 @@ router.register(r"admin/matches", AdminMatchViewSet, basename="admin-matches")
 urlpatterns = [
     # ── Directory ────────────────────────────────────────────────────────────
     path("directory/", DirectoryListView.as_view(), name="directory-list"),
+    path("directory/<uuid:user_id>/", DirectoryProfileDetailView.as_view(), name="directory-detail"),
 
     # ── Connection requests ──────────────────────────────────────────────────
     path("requests/send/",              SendConnectionRequestView.as_view(), name="request-send"),
@@ -77,10 +78,10 @@ urlpatterns = [
     path("<uuid:pk>/wali/request/", SendWaliRequestView.as_view(),       name="match-wali-request"),
     path("<uuid:pk>/wali/respond/", RespondToWaliRequestView.as_view(),  name="match-wali-respond"),
 
-    # ── Admin (router) ────────────────────────────────────────────────────────
+    # ── Admin (router — namespaced under admin/ so it never collides with "") ──
     path("", include(router.urls)),
 
-    # ── Match list/detail (must come after specific paths to avoid conflicts) ──
+    # ── Match list/detail (must come LAST — catch-all for "" and "<uuid:pk>/") ──
     path("", MatchListView.as_view(), name="match-list"),
     path("<uuid:pk>/", MatchDetailView.as_view(), name="match-detail"),
 ]

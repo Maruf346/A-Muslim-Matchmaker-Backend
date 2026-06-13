@@ -167,6 +167,11 @@ class SendConnectionRequestSerializer(serializers.Serializer):
         if request and target == request.user:
             raise serializers.ValidationError("You cannot send a connection request to yourself.")
 
+        if request:
+            from wishlists.services import VisibilityService
+            if not VisibilityService.can_view_profile(request.user, target):
+                raise serializers.ValidationError("Target user not found.")
+
         return value
 
 
