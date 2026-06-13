@@ -1,0 +1,617 @@
+"""
+matches/services.py
+
+Service layer for the matches app — keeps views thin and business logic
+testable.
+
+Classes:
+    SubscriptionLimitService — enforces monthly connection request limits
+    MatchService             — connection request lifecycle, photo cycle,
+                                wali request cycle, status transitions
+"""
+
+import logging
+from datetime import timedelta
+
+from django.db import models
+from django.utils import timezone
+
+from notifications.services import NotificationTemplates
+
+from .models import *
+
+logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subscription Limit Service
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SubscriptionLimitService:
+    """
+    Enforces connection-request limits based on subscription plan.
+
+    Plan rules:
+        FREE    → cannot send requests (blocked at permission level)
+        MONTHLY → 10 connection requests per cycle
+                  Cycle resets on the user's subscription_start anniversary
+                  each month (e.g. subscribed on the 15th → cycle renews
+                  on the 15th of every month).
+        ANNUAL  → unlimited
+    """
+
+    MONTHLY_REQUEST_LIMIT = 10
+
+    @classmethod
+    def get_current_cycle_start(cls, user) -> "timezone.datetime":
+        """
+        Compute the start of the user's current monthly billing cycle
+        based on their subscription_start anniversary day.
+        """
+        now = timezone.now()
+        sub_start = user.subscription_start or user.created_at
+
+        anniversary_day = sub_start.day
+        # Try this month's anniversary first
+        try:
+            cycle_start = now.replace(
+                day=anniversary_day, hour=0, minute=0, second=0, microsecond=0
+            )
+        except ValueError:
+            # Handle months with fewer days (e.g. Feb 30 doesn't exist)
+            cycle_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        if cycle_start > now:
+            # Anniversary hasn't occurred yet this month — go back one month
+            if cycle_start.month == 1:
+                cycle_start = cycle_start.replace(year=cycle_start.year - 1, month=12)
+            else:
+                try:
+                    cycle_start = cycle_start.replace(month=cycle_start.month - 1)
+                except ValueError:
+                    cycle_start = cycle_start.replace(month=cycle_start.month - 1, day=1)
+
+        return cycle_start
+
+    @classmethod
+    def get_requests_sent_this_cycle(cls, user) -> int:
+        """Count connection requests sent by this user since cycle start."""
+        cycle_start = cls.get_current_cycle_start(user)
+        return Match.objects.filter(
+            initiated_by=user,
+            requested_at__gte=cycle_start,
+        ).count()
+
+    @classmethod
+    def can_send_request(cls, user) -> tuple[bool, str]:
+        """
+        Returns (allowed: bool, reason: str).
+        FREE is already blocked at the permission layer, but checked here too
+        for safety.
+        """
+        if user.subscription_plan == "free":
+            return False, "Free plan does not allow sending connection requests. Please upgrade."
+
+        if user.subscription_plan == "annual":
+            return True, ""
+
+        # Monthly — check limit
+        sent = cls.get_requests_sent_this_cycle(user)
+        if sent >= cls.MONTHLY_REQUEST_LIMIT:
+            cycle_start = cls.get_current_cycle_start(user)
+            next_reset  = cycle_start + timedelta(days=30)  # approximate, anniversary-based
+            return False, (
+                f"You have reached your monthly limit of {cls.MONTHLY_REQUEST_LIMIT} "
+                f"connection requests. Your limit resets on your subscription "
+                f"anniversary date."
+            )
+
+        return True, ""
+
+    @classmethod
+    def get_remaining_requests(cls, user) -> int | None:
+        """Returns remaining requests this cycle, or None if unlimited."""
+        if user.subscription_plan == "annual":
+            return None
+        if user.subscription_plan == "free":
+            return 0
+        sent = cls.get_requests_sent_this_cycle(user)
+        return max(0, cls.MONTHLY_REQUEST_LIMIT - sent)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Match Service
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MatchService:
+    """
+    Core business logic for the connection/match lifecycle.
+
+    All methods assume role validation has already happened in the view
+    (e.g. only Male can call send_connection_request, only Female/Wali
+    can call respond_to_connection_request).
+    """
+
+    # ── Connection requests ───────────────────────────────────────────────────
+
+    @staticmethod
+    def send_connection_request(male_user, target_user) -> Match:
+        """
+        Male sends a connection request to a Female or Wali.
+
+        Raises:
+            ValueError if a match already exists between these two users,
+            or if the male user has hit their subscription limit.
+        """
+        if Match.objects.filter(male_user=male_user, other_user=target_user).exists():
+            raise ValueError("A connection already exists with this user.")
+
+        allowed, reason = SubscriptionLimitService.can_send_request(male_user)
+        if not allowed:
+            raise ValueError(reason)
+
+        match = Match.objects.create(
+            male_user=male_user,
+            other_user=target_user,
+            initiated_by=male_user,
+            status=MatchStatus.PENDING,
+        )
+
+        try:
+            NotificationTemplates.connection_request_received(
+                receiver=target_user, sender=male_user
+            )
+        except Exception:
+            logger.exception("connection_request_received notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def accept_connection_request(match: Match, responder) -> Match:
+        """
+        Female/Wali accepts a pending connection request.
+        Transitions PENDING → ACCEPTED. Assigns match_id.
+        """
+        if match.status != MatchStatus.PENDING:
+            raise ValueError(f"Cannot accept a match with status '{match.status}'.")
+        if responder != match.other_user:
+            raise ValueError("Only the receiver can accept this request.")
+
+        now = timezone.now()
+        match.status       = MatchStatus.ACCEPTED
+        match.responded_at = now
+        match.accepted_at  = now
+        if not match.match_id:
+            match.match_id = generate_match_id()
+        match.save(update_fields=["status", "responded_at", "accepted_at", "match_id", "updated_at"])
+
+        try:
+            NotificationTemplates.connection_request_accepted(
+                sender=match.male_user, receiver=match.other_user
+            )
+            NotificationTemplates.match_created(user=match.male_user, match_id=match.match_id)
+            NotificationTemplates.match_created(user=match.other_user, match_id=match.match_id)
+        except Exception:
+            logger.exception("Post-accept notifications failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def decline_connection_request(match: Match, responder) -> Match:
+        """Female/Wali declines a pending connection request."""
+        if match.status != MatchStatus.PENDING:
+            raise ValueError(f"Cannot decline a match with status '{match.status}'.")
+        if responder != match.other_user:
+            raise ValueError("Only the receiver can decline this request.")
+
+        match.status       = MatchStatus.DECLINED
+        match.responded_at = timezone.now()
+        match.save(update_fields=["status", "responded_at", "updated_at"])
+
+        try:
+            NotificationTemplates.connection_request_declined(
+                sender=match.male_user, receiver=match.other_user
+            )
+        except Exception:
+            logger.exception("connection_request_declined notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def cancel_pending_request(match: Match, requester) -> Match:
+        """
+        Male cancels their own PENDING (not yet responded) request.
+        This is a hard delete since no mutual interest was ever established.
+        """
+        if match.status != MatchStatus.PENDING:
+            raise ValueError("Only pending requests can be cancelled this way.")
+        if requester != match.male_user:
+            raise ValueError("Only the sender can cancel a pending request.")
+
+        other_user = match.other_user
+        match.delete()
+
+        try:
+            NotificationTemplates.connection_request_cancelled(
+                receiver=other_user, sender=requester
+            )
+        except Exception:
+            logger.exception("connection_request_cancelled notification failed.")
+
+        return None
+
+    @staticmethod
+    def resend_request(male_user, target_user) -> Match:
+        """
+        Male sends a new connection request after a previous one was
+        DECLINED or the previous match record is gone (CANCELLED was
+        a hard-delete in the old flow — but for ACCEPTED→CANCELLED
+        matches, see resend_after_cancel).
+
+        Only allowed if no existing match row exists, or the existing
+        row has status DECLINED (in which case it's reset to PENDING).
+        """
+        existing = Match.objects.filter(male_user=male_user, other_user=target_user).first()
+
+        if existing is None:
+            return MatchService.send_connection_request(male_user, target_user)
+
+        if existing.status == MatchStatus.DECLINED:
+            allowed, reason = SubscriptionLimitService.can_send_request(male_user)
+            if not allowed:
+                raise ValueError(reason)
+
+            existing.status       = MatchStatus.PENDING
+            existing.responded_at = None
+            existing.requested_at = timezone.now()
+            existing.save(update_fields=["status", "responded_at", "requested_at", "updated_at"])
+
+            try:
+                NotificationTemplates.connection_request_received(
+                    receiver=target_user, sender=male_user
+                )
+            except Exception:
+                logger.exception("Resend notification failed for match %s", existing.id)
+
+            return existing
+
+        raise ValueError(
+            f"Cannot resend — existing connection has status '{existing.status}'."
+        )
+
+    # ── Cancel after mutual interest (pre-wali stage) ────────────────────────
+
+    @staticmethod
+    def cancel_match(match: Match, requester) -> Match:
+        """
+        Either party cancels after mutual interest (ACCEPTED stage),
+        before any wali request has been made.
+
+        Transitions ACCEPTED → CANCELLED. Tracks cancelled_by/cancelled_at.
+        """
+        if match.status != MatchStatus.ACCEPTED:
+            raise ValueError(
+                f"Match can only be cancelled from 'accepted' status. Current status: '{match.status}'."
+            )
+        if requester not in (match.male_user, match.other_user):
+            raise ValueError("You are not a participant in this match.")
+
+        match.status       = MatchStatus.CANCELLED
+        match.cancelled_by = requester
+        match.cancelled_at = timezone.now()
+        match.save(update_fields=["status", "cancelled_by", "cancelled_at", "updated_at"])
+
+        other_party = match.other_party(requester)
+        try:
+            NotificationTemplates.connection_request_cancelled(
+                receiver=other_party, sender=requester
+            )
+        except Exception:
+            logger.exception("Cancel notification failed for match %s", match.id)
+
+        return match
+
+    # ── Photo request cycle ───────────────────────────────────────────────────
+
+    @staticmethod
+    def request_photo_view(match: Match, requester) -> Match:
+        """
+        Either party (post mutual-interest) requests to view photos
+        again after they've been hidden.
+
+        Transitions photo_request_status: NONE/APPROVED → REQUESTED.
+        """
+        if not match.is_mutual:
+            raise ValueError("Photo requests are only available after mutual interest.")
+        if requester not in (match.male_user, match.other_user):
+            raise ValueError("You are not a participant in this match.")
+        if match.photo_request_status == PhotoRequestStatus.REQUESTED:
+            raise ValueError("A photo request is already pending.")
+
+        match.photo_request_status = PhotoRequestStatus.REQUESTED
+        match.photo_requested_by   = requester
+        match.save(update_fields=["photo_request_status", "photo_requested_by", "updated_at"])
+
+        other_party = match.other_party(requester)
+        try:
+            NotificationTemplates.photo_request_received(
+                receiver=other_party, requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("photo_request_received notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def approve_photo_request(match: Match, responder) -> Match:
+        """
+        The other party approves the photo view request.
+        Sets photos_currently_visible=True, increments counter,
+        records timestamps. Resets photo_request_status to NONE
+        (ready for a future cycle).
+        """
+        if match.photo_request_status != PhotoRequestStatus.REQUESTED:
+            raise ValueError("There is no pending photo request to approve.")
+        if responder == match.photo_requested_by:
+            raise ValueError("You cannot approve your own photo request.")
+        if responder not in (match.male_user, match.other_user):
+            raise ValueError("You are not a participant in this match.")
+
+        now = timezone.now()
+        match.photo_request_status   = PhotoRequestStatus.APPROVED
+        match.photos_currently_visible = True
+        match.photos_revealed_count += 1
+        match.last_photos_revealed_at = now
+        if not match.first_photos_revealed_at:
+            match.first_photos_revealed_at = now
+        match.save(update_fields=[
+            "photo_request_status", "photos_currently_visible",
+            "photos_revealed_count", "last_photos_revealed_at",
+            "first_photos_revealed_at", "updated_at",
+        ])
+
+        requester = match.photo_requested_by
+        try:
+            NotificationTemplates.photo_request_approved(
+                requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("photo_request_approved notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def decline_photo_request(match: Match, responder) -> Match:
+        """The other party declines the photo view request. Resets to NONE."""
+        if match.photo_request_status != PhotoRequestStatus.REQUESTED:
+            raise ValueError("There is no pending photo request to decline.")
+        if responder == match.photo_requested_by:
+            raise ValueError("You cannot decline your own photo request.")
+
+        requester = match.photo_requested_by
+
+        match.photo_request_status = PhotoRequestStatus.NONE
+        match.photo_requested_by   = None
+        match.save(update_fields=["photo_request_status", "photo_requested_by", "updated_at"])
+
+        try:
+            NotificationTemplates.photo_request_declined(
+                requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("photo_request_declined notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def mark_photos_viewed(match: Match, viewer) -> Match:
+        """
+        Called when the user actually opens/views the revealed photos.
+        Flips photos_currently_visible back to False — a new PhotoRequest
+        cycle is required to view again.
+        """
+        if not match.photos_currently_visible:
+            raise ValueError("Photos are not currently visible.")
+        if viewer not in (match.male_user, match.other_user):
+            raise ValueError("You are not a participant in this match.")
+
+        match.photos_currently_visible = False
+        match.photo_request_status     = PhotoRequestStatus.NONE
+        match.save(update_fields=["photos_currently_visible", "photo_request_status", "updated_at"])
+        return match
+
+    # ── Wali request cycle (Male-initiated only) ─────────────────────────────
+
+    @staticmethod
+    def send_wali_request(match: Match, requester) -> Match:
+        """
+        Male sends a wali request. Only available post mutual-interest,
+        and only the male_user can initiate.
+
+        Transitions:
+            wali_request_status: NONE/DECLINED → REQUESTED
+            status: ACCEPTED → WALI_REQUESTED
+        """
+        if requester != match.male_user:
+            raise ValueError("Only the male user can send a wali request.")
+        if not match.is_mutual or match.status != MatchStatus.ACCEPTED:
+            raise ValueError(
+                f"Wali request can only be sent from 'accepted' status. Current status: '{match.status}'."
+            )
+        if match.wali_request_status == WaliRequestStatus.REQUESTED:
+            raise ValueError("A wali request is already pending.")
+
+        now = timezone.now()
+        match.wali_request_status = WaliRequestStatus.REQUESTED
+        match.wali_requested_at   = now
+        match.status              = MatchStatus.WALI_REQUESTED
+        match.save(update_fields=["wali_request_status", "wali_requested_at", "status", "updated_at"])
+
+        try:
+            NotificationTemplates.wali_request_received(
+                receiver=match.other_user, requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("wali_request_received notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def accept_wali_request(match: Match, responder) -> Match:
+        """
+        Female/Wali accepts the wali request.
+
+        Transitions:
+            wali_request_status: REQUESTED → ACCEPTED
+            status: WALI_REQUESTED → WALI_ACCEPTED → IN_DISCUSSION
+                    (both transitions happen together per business rule:
+                     "After accepting wali request from both ends... status
+                     is in_discussion")
+        """
+        if responder != match.other_user:
+            raise ValueError("Only the receiver can accept the wali request.")
+        if match.wali_request_status != WaliRequestStatus.REQUESTED:
+            raise ValueError("There is no pending wali request to accept.")
+
+        now = timezone.now()
+        match.wali_request_status = WaliRequestStatus.ACCEPTED
+        match.wali_responded_at   = now
+        match.status              = MatchStatus.IN_DISCUSSION
+        match.in_discussion_at    = now
+        match.save(update_fields=[
+            "wali_request_status", "wali_responded_at",
+            "status", "in_discussion_at", "updated_at",
+        ])
+
+        try:
+            NotificationTemplates.wali_request_approved(
+                requester=match.male_user, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("wali_request_approved notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def decline_wali_request(match: Match, responder) -> Match:
+        """
+        Female/Wali declines the wali request.
+
+        Transitions:
+            wali_request_status: REQUESTED → DECLINED
+            status: WALI_REQUESTED → ACCEPTED (back to mutual-interest stage,
+                    male can send another wali request later)
+        """
+        if responder != match.other_user:
+            raise ValueError("Only the receiver can decline the wali request.")
+        if match.wali_request_status != WaliRequestStatus.REQUESTED:
+            raise ValueError("There is no pending wali request to decline.")
+
+        now = timezone.now()
+        match.wali_request_status = WaliRequestStatus.DECLINED
+        match.wali_responded_at   = now
+        match.status              = MatchStatus.ACCEPTED  # back to mutual stage
+        match.save(update_fields=["wali_request_status", "wali_responded_at", "status", "updated_at"])
+
+        try:
+            NotificationTemplates.wali_request_declined(
+                requester=match.male_user, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("wali_request_declined notification failed for match %s", match.id)
+
+        return match
+
+    # ── Unlock flow (post wali-accepted → drop) ──────────────────────────────
+
+    @staticmethod
+    def request_unlock(match: Match, requester) -> Match:
+        """
+        Either party requests to "unlock" (end) the connection during/after
+        the wali-accepted stage (status IN_DISCUSSION).
+
+        This directly transitions status → DROPPED and notifies the other
+        party. Per business rule: "when user presses unlock, then it shows
+        the cancellation of connection request is sent to the other end's
+        user" — so this is an immediate action with notification, not a
+        two-step approval.
+        """
+        if match.status != MatchStatus.IN_DISCUSSION:
+            raise ValueError(
+                f"Unlock is only available from 'in_discussion' status. Current status: '{match.status}'."
+            )
+        if requester not in (match.male_user, match.other_user):
+            raise ValueError("You are not a participant in this match.")
+
+        match.status     = MatchStatus.DROPPED
+        match.dropped_by = requester
+        match.dropped_at = timezone.now()
+        match.save(update_fields=["status", "dropped_by", "dropped_at", "updated_at"])
+
+        other_party = match.other_party(requester)
+        try:
+            NotificationTemplates.unlock_request_received(
+                receiver=other_party, requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("unlock_request_received notification failed for match %s", match.id)
+
+        return match
+
+    # ── Mark married (either party or admin) ──────────────────────────────────
+
+    @staticmethod
+    def mark_married(match: Match, actor) -> Match:
+        """
+        Mark the match as MARRIED. Can be called by either participant
+        (post IN_DISCUSSION) or by an admin via override.
+        """
+        if match.status not in (MatchStatus.IN_DISCUSSION,):
+            raise ValueError(
+                f"Match can only be marked married from 'in_discussion' status. Current status: '{match.status}'."
+            )
+
+        is_admin      = getattr(actor, "is_admin_user", False)
+        is_participant = actor in (match.male_user, match.other_user)
+        if not is_admin and not is_participant:
+            raise ValueError("You are not authorized to update this match.")
+
+        match.status     = MatchStatus.MARRIED
+        match.married_at = timezone.now()
+        if is_admin:
+            match.last_status_changed_by_admin = actor
+        match.save(update_fields=["status", "married_at", "last_status_changed_by_admin", "updated_at"])
+
+        return match
+
+    # ── Admin override ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def admin_override_status(match: Match, admin_user, new_status: str) -> Match:
+        """
+        Admin can manually set the match to ANY status, including MARRIED
+        or DROPPED, regardless of the current status. Records the admin
+        who made the change and sets relevant timestamps.
+        """
+        if new_status not in MatchStatus.values:
+            raise ValueError(f"Invalid status: {new_status}")
+
+        now = timezone.now()
+        match.status = new_status
+        match.last_status_changed_by_admin = admin_user
+
+        if new_status == MatchStatus.MARRIED and not match.married_at:
+            match.married_at = now
+        if new_status == MatchStatus.DROPPED and not match.dropped_at:
+            match.dropped_at = now
+        if new_status == MatchStatus.CANCELLED and not match.cancelled_at:
+            match.cancelled_at = now
+        if new_status == MatchStatus.ACCEPTED and not match.accepted_at:
+            match.accepted_at = now
+            if not match.match_id:
+                match.match_id = generate_match_id()
+        if new_status == MatchStatus.IN_DISCUSSION and not match.in_discussion_at:
+            match.in_discussion_at = now
+
+        match.save()
+        return match
