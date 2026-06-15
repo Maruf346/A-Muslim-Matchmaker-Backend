@@ -14,8 +14,8 @@ Why no AllowedHostsOriginValidator:
     the network level in production.
 
 WebSocket routes:
-    ws://host/ws/notifications/?token=<jwt>      → NotificationConsumer (admin only)
-    ws://host/ws/chat/<room_id>/?token=<jwt>     → ChatConsumer (TODO: wire in when chat app is ready)
+    ws://host/ws/notifications/?token=<jwt>   → NotificationConsumer (admin only)
+    ws://host/ws/chat/<room_id>/?token=<jwt>  → ChatConsumer (normal user: own room; admin: any room)
 """
 
 import os
@@ -29,14 +29,14 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django_asgi_app = get_asgi_application()
 
 from notifications.routing import websocket_urlpatterns as notification_ws
-# from chat.routing import websocket_urlpatterns as chat_ws  # uncomment when chat app is ready
+from chat.routing import websocket_urlpatterns as chat_ws
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AuthMiddlewareStack(
         URLRouter(
             notification_ws
-            # + chat_ws  # uncomment when chat app is ready
+            + chat_ws
         )
     ),
 })

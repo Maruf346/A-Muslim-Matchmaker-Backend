@@ -14,8 +14,10 @@ urlpatterns = [
     path('user/', include('users.urls')),
     path('notification/', include('notifications.urls')),
     path("questions/",    include("questions.urls")),
-    path('supports/', include('supports.urls')),
+    path('wishlists/', include('wishlists.urls')),
     path('matches/', include('matches.urls')),
+    path('supports/', include('supports.urls')),
+    path('chat/', include('chat.urls')),
 
     #JWT endpoints
     # path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
