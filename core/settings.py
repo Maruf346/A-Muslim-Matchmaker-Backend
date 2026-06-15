@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'supports',
     'matches',
     'wishlists',
+    'chat',
 ]
 
 MIDDLEWARE = [
