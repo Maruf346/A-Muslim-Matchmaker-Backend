@@ -663,12 +663,21 @@ class CreateMatchmakerSerializer(serializers.Serializer):
     last_name  = serializers.CharField(max_length=75)
     email     = serializers.EmailField()
     password  = serializers.CharField(min_length=8, write_only=True, style={"input_type": "password"})
+    profile_picture = serializers.ImageField(required=False, allow_null=True)
 
     def validate_email(self, value):
         return _validate_email_unique(value)
 
     def validate_password(self, value):
         return _validate_password_strength(value)
+
+
+class UpdateMatchmakerSerializer(serializers.ModelSerializer):
+    """Used by Superadmin to update basic info of a Matchmaker."""
+
+    class Meta:
+        model = User
+        fields = ["first_name", "last_name", "profile_picture"]
 
 
 class MatchmakerDetailSerializer(serializers.ModelSerializer):

@@ -1003,6 +1003,7 @@ class MatchmakerViewSet(viewsets.ReadOnlyModelViewSet):
     """
     permission_classes = [IsSuperAdmin]
     serializer_class   = MatchmakerDetailSerializer
+    parser_classes     = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         return User.objects.filter(
@@ -1033,6 +1034,7 @@ class MatchmakerViewSet(viewsets.ReadOnlyModelViewSet):
                 password=d["password"],
                 first_name=d["first_name"],
                 last_name=d["last_name"],
+                profile_picture=d.get("profile_picture"),
             )
             return Response(
                 MatchmakerDetailSerializer(user, context={"request": request}).data,
@@ -1040,6 +1042,28 @@ class MatchmakerViewSet(viewsets.ReadOnlyModelViewSet):
             )
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @extend_schema(
+        tags=["Admin - Matchmakers"],
+        summary="Superadmin — Update matchmaker basic info",
+        description="Update a matchmaker's first name, last name, and profile picture.",
+        request=UpdateMatchmakerSerializer,
+        responses={200: MatchmakerDetailSerializer},
+    )
+    @action(detail=True, methods=["patch"], url_path="update-info")
+    def update_info(self, request, pk=None):
+        user = self.get_object()
+        serializer = UpdateMatchmakerSerializer(user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        updated_user = MatchmakerService.update_matchmaker(
+            user, **serializer.validated_data
+        )
+
+        return Response(
+            MatchmakerDetailSerializer(updated_user, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         tags=["Admin - Matchmakers"],

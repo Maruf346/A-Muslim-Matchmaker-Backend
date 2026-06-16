@@ -339,7 +339,7 @@ class MatchmakerService:
     """
 
     @staticmethod
-    def create_matchmaker(email: str, password: str, first_name: str, last_name: str):
+    def create_matchmaker(email: str, password: str, first_name: str, last_name: str, profile_picture=None):
         """Create a new Matchmaker account. No OTP — admin sets password directly."""
         from users.models import AuthProvider, User, UserRole, UserSettings
 
@@ -351,6 +351,7 @@ class MatchmakerService:
             first_name=first_name,
             last_name=last_name,
             role=UserRole.MATCHMAKER,
+            profile_picture=profile_picture,
             is_active=True,
             is_staff=True,
             is_superuser=False,
@@ -359,6 +360,16 @@ class MatchmakerService:
         user.set_password(password)
         user.save(update_fields=["password"])
         UserSettings.objects.create(user=user)
+        return user
+
+    @staticmethod
+    def update_matchmaker(user, **data):
+        """Update matchmaker basic fields."""
+        update_fields = []
+        for field, value in data.items():
+            setattr(user, field, value)
+            update_fields.append(field)
+        user.save(update_fields=update_fields)
         return user
 
     @staticmethod
