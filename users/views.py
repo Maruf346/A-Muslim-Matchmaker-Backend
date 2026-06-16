@@ -1070,6 +1070,39 @@ class MatchmakerViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(
         tags=["Admin - Matchmakers"],
+        summary="Superadmin — Block or unblock a matchmaker",
+        description=(
+            "Set `is_active=false` to block a matchmaker or `is_active=true` to unblock. "
+            "A superadmin cannot block their own account."
+        ),
+        request=AdminBlockUserSerializer,
+        responses={
+            200: _message_response,
+            400: OpenApiResponse(description="Validation error."),
+            403: OpenApiResponse(description="Cannot block your own account."),
+        },
+    )
+    @action(detail=True, methods=["patch"], url_path="set-active")
+    def set_active(self, request, pk=None):
+        user = self.get_object()
+        if user == request.user:
+            return Response(
+                {"error": "You cannot block or unblock your own account."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = AdminBlockUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user.is_active = serializer.validated_data["is_active"]
+        user.deactivated_by_user = False
+        user.save(update_fields=["is_active", "deactivated_by_user"])
+
+        action_verb = "unblocked" if user.is_active else "blocked"
+        return Response({"message": f"Matchmaker {user.email} has been {action_verb}."}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Admin - Matchmakers"],
         summary="Superadmin — Delete matchmaker account",
         description="Permanently deletes a Matchmaker or Superadmin account. Irreversible.",
         responses={
