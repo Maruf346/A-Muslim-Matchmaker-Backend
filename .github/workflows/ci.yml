@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Lint, Migrate & Test
+    runs-on: ubuntu-latest
+
+    # ── Service containers (available to the job at localhost:<port>) ──────────
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # ── Environment variables ──────────────────────────────────────────────────
+    # These mirror the .env.example defaults. Secrets come from GitHub Secrets.
+    env:
+      # Django
+      SECRET_KEY:              ${{ secrets.SECRET_KEY }}
+      DEBUG:                   "True"
+      ALLOWED_HOSTS:           "localhost,127.0.0.1"
+
+      # Database — SQLite for CI (fast, no extra service needed)
+      DB_ENGINE:               "django.db.backends.sqlite3"
+
+      # Redis — the service container above
+      REDIS_HOST:              "localhost"
+      REDIS_PORT:              "6379"
+
+      # Email — console backend in CI (no real SMTP needed)
+      EMAIL_BACKEND:           "django.core.mail.backends.console.EmailBackend"
+      EMAIL_HOST:              "smtp.gmail.com"
+      EMAIL_PORT:              "587"
+      EMAIL_USE_TLS:           "True"
+      EMAIL_HOST_USER:         ""
+      EMAIL_HOST_PASSWORD:     ""
+      DEFAULT_FROM_EMAIL:      "noreply@amuslimmatrimony.com"
+
+      # URLs
+      BASE_URL:                "http://127.0.0.1:8001/"
+      FRONTEND_URL:            "http://localhost:3000"
+      FRONTEND_LOGIN_SUCCESS_URL: "http://localhost:3000/dashboard"
+      FRONTEND_LOGIN_ERROR_URL:   "http://localhost:3000/login?error=true"
+
+      # OAuth — empty placeholders (not used in tests)
+      GOOGLE_CLIENT_ID:        ""
+      GOOGLE_CLIENT_SECRET:    ""
+      GOOGLE_REDIRECT_URI:     ""
+      GOOGLE_WEB_CLIENT_ID:    ""
+      APPLE_CLIENT_ID:         ""
+
+      # Business logic
+      OTP_EXPIRY_SECONDS:                  "300"
+      PASSWORD_RESET_OTP_EXPIRY_SECONDS:   "600"
+      PASSWORD_RESET_TOKEN_EXPIRY_SECONDS: "900"
+      LAST_ACTIVE_UPDATE_INTERVAL:         "120"
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ───────────────────────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # ── 3. System dependencies ────────────────────────────────────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libpq-dev libjpeg-dev libmagic1 zlib1g-dev
+
+      # ── 4. Python dependencies ────────────────────────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 5. Create required directories ────────────────────────────────────────
+      # db_volume/db.sqlite3 is the SQLite path — directory must exist
+      - name: Create runtime directories
+        run: |
+          mkdir -p db_volume staticfiles media
+
+      # ── 6. Django system check ────────────────────────────────────────────────
+      - name: Django system check
+        run: python manage.py check
+
+      # ── 7. Run migrations ─────────────────────────────────────────────────────
+      - name: Run migrations
+        run: python manage.py migrate --noinput
+
+      # ── 8. Run tests ──────────────────────────────────────────────────────────
+      - name: Run tests
+        run: python manage.py test --verbosity=2
+
+  # ── Docker build validation ─────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    needs: test   # Only build if tests pass
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t amm-api:ci .
+
+      - name: Verify entrypoint exists and is executable
+        run: |
+          docker run --rm --entrypoint="" amm-api:ci test -x /entrypoint.sh \
+            && echo "✅ entrypoint.sh is executable"

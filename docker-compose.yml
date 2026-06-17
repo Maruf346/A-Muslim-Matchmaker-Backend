@@ -1,0 +1,144 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  AMM (A Muslim Matchmaker) — Local Development  (Docker Compose)
+#
+#  Usage:
+#    docker compose up --build          # first run
+#    docker compose up                  # subsequent runs (image already built)
+#    docker compose down                # stop containers (volumes preserved)
+#    docker compose down -v             # stop + wipe volumes (fresh DB)
+#
+#  Services:
+#    nginx          → http://localhost:8001    (reverse proxy + static files)
+#    django         → internal :8000           (Daphne ASGI, HTTP + WebSocket)
+#    celery_worker  → background task runner
+#    celery_beat    → periodic task scheduler
+#    redis          → broker + cache + channel layer
+#
+#  Access points (host port 8001 — chosen to avoid clashing with other local projects):
+#    API + Swagger  → http://localhost:8001/api/docs/
+#    Django Admin   → http://localhost:8001/admin/
+#    WebSocket chat → ws://localhost:8001/ws/chat/<room_id>/?token=<jwt>
+#    WebSocket notif→ ws://localhost:8001/ws/notifications/?token=<jwt>
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Shared config block — all Django-based services (django/worker/beat) inherit this
+x-django-base: &django-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  environment:
+    # Override Docker-internal hostnames explicitly so Windows CRLF in .env
+    # can never corrupt critical connection strings.
+    REDIS_HOST: redis
+    REDIS_PORT: "6379"
+  volumes:
+    # Bind-mount source for hot-reload in development.
+    # In production (docker-compose.prod.yml) this is removed.
+    - .:/app
+    # Named volumes survive image rebuilds — this is what keeps your DB alive.
+    - sqlite_data:/app/db_volume
+    - media_data:/app/media
+    - static_data:/app/staticfiles
+  depends_on:
+    redis:
+      condition: service_healthy
+
+
+services:
+
+  # ── Nginx ─────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: amm_nginx
+    ports:
+      # Host port 8001 → container port 80. Chosen to avoid colliding with
+      # other local projects already using port 80.
+      - "8001:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_data:/app/staticfiles:ro
+      - media_data:/app/media:ro
+    depends_on:
+      django:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Django / Daphne ───────────────────────────────────────────────────────
+  django:
+    <<: *django-base
+    container_name: amm_django
+    environment:
+      SERVICE_TYPE: django
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    # Port 8000 is NOT exposed to the host — Nginx is the only entry point.
+    # If you want to hit Django directly (bypassing Nginx) during debugging,
+    # uncomment the line below temporarily:
+    # ports:
+    #   - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/docs/')"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s   # give migrations + collectstatic time to finish
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────
+  celery_worker:
+    <<: *django-base
+    container_name: amm_celery_worker
+    environment:
+      SERVICE_TYPE: celery_worker
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_healthy   # wait for migrations before processing tasks
+
+  # ── Celery Beat ───────────────────────────────────────────────────────────
+  celery_beat:
+    <<: *django-base
+    container_name: amm_celery_beat
+    environment:
+      SERVICE_TYPE: celery_beat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_healthy   # Beat stores schedule in DB — needs migrations first
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: amm_redis
+    restart: unless-stopped
+    # Persist Redis data to survive container restarts
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+# These survive `docker compose down` but are wiped by `docker compose down -v`.
+volumes:
+  sqlite_data:    # SQLite database file (db_volume/db.sqlite3)
+  media_data:     # User-uploaded files (profile pictures, chat attachments, etc.)
+  static_data:    # Django collectstatic output
+  redis_data:     # Redis AOF persistence

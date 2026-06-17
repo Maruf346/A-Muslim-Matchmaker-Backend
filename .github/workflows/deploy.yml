@@ -1,0 +1,96 @@
+name: Deploy to AWS EC2
+
+# ── Trigger ───────────────────────────────────────────────────────────────────
+# Only deploy when CI passes on main.
+# The `workflow_run` trigger ensures CI completes successfully before deploy runs.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    # Only run if CI workflow succeeded (not just completed)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      # ── 1. Checkout (for any local scripts needed) ─────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. SSH setup ───────────────────────────────────────────────────────
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      # ── 3. Deploy ──────────────────────────────────────────────────────────
+      - name: Deploy to EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+
+            set -e
+            echo "════════════════════════════════"
+            echo "  AMM — Deployment Started"
+            echo "════════════════════════════════"
+
+            cd ~/amm-backend
+
+            echo "→ Pulling latest code from main..."
+            git pull origin main
+
+            echo "→ Stopping existing containers..."
+            docker compose -f docker-compose.prod.yml --env-file .env.production down --remove-orphans
+
+            echo "→ Building updated images..."
+            docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache
+
+            echo "→ Starting containers..."
+            docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+
+            echo "→ Waiting for Django to become healthy..."
+            for i in $(seq 1 24); do
+              if docker compose -f docker-compose.prod.yml --env-file .env.production \
+                  exec -T django python manage.py check --deploy 2>/dev/null; then
+                echo "✅ Django is healthy."
+                break
+              fi
+              echo "   Not ready yet ($i/24) — waiting 5s..."
+              sleep 5
+            done
+
+            echo "→ Running database migrations..."
+            docker compose -f docker-compose.prod.yml --env-file .env.production \
+              exec -T django python manage.py migrate --noinput
+
+            echo "→ Collecting static files..."
+            docker compose -f docker-compose.prod.yml --env-file .env.production \
+              exec -T django python manage.py collectstatic --noinput
+
+            echo "→ Pruning unused Docker images..."
+            docker image prune -f
+
+            echo "════════════════════════════════"
+            echo "  ✅ Deployment complete!"
+            echo "════════════════════════════════"
+
+          ENDSSH
+
+      # ── 4. Deployment notification ─────────────────────────────────────────
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ AMM deployed successfully to ${{ secrets.EC2_HOST }}"
+          else
+            echo "❌ AMM deployment FAILED — check logs above"
+          fi

@@ -1,0 +1,37 @@
+# ──────────────────────────────────────────────
+#  Force LF line endings for all shell scripts
+#  and Python files when checked out on any OS.
+#  This permanently prevents the Windows CRLF bug
+#  where entrypoint.sh fails inside Docker with:
+#  "exec /app/entrypoint.sh: no such file or directory"
+# ──────────────────────────────────────────────
+
+# Shell scripts must always use LF
+*.sh        text eol=lf
+
+# Python files — LF
+*.py        text eol=lf
+
+# Django / config files — LF
+*.txt       text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.toml      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.env       text eol=lf
+*.md        text eol=lf
+
+# Windows-only files can keep CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binary files — no line ending conversion
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary

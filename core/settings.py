@@ -175,20 +175,6 @@ REDIS_HOST = os.getenv('REDIS_HOST', 'redis')
 REDIS_PORT = os.getenv('REDIS_PORT', '6379')
 
 
-CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/1', # conn url, [/1 -> Redis db no. 1]
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        },
-        'KEY_PREFIX': 'amm',   # Adds a prefix to every cache key.
-        'TIMEOUT': 300,  # Default cache expiry time = 300s (5 mins).
-    }
-}
-
-
-
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
@@ -411,8 +397,8 @@ CACHES = {
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         },
-        'KEY_PREFIX': 'autointel',
-        'TIMEOUT': 300,
+        'KEY_PREFIX': 'amm',   # Adds a prefix to every cache key.
+        'TIMEOUT': 300,  # Default cache expiry time = 300s (5 mins).
     }
 }
 
