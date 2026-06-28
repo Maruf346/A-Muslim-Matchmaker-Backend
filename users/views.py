@@ -106,6 +106,15 @@ _admin_login_response_schema = inline_serializer(
     },
 )
 
+_admin_otp_sent_response = inline_serializer(
+    name="AdminOTPSentResponse",
+    fields={
+        "message":            drf_serializers.CharField(),
+        "email":              drf_serializers.EmailField(),
+        "expires_in_seconds": drf_serializers.IntegerField(),
+    },
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MALE REGISTRATION
@@ -508,15 +517,15 @@ class WaliLoginView(APIView):
 
 @extend_schema(
     tags=["Auth - Admin"],
-    summary="Admin — Login (Matchmaker & Superadmin)",
+    summary="Admin — Login Step 1: Submit credentials (Matchmaker & Superadmin)",
     description=(
-        "Shared login endpoint for both Matchmaker and Superadmin. "
-        "Response includes `admin_type` field (`matchmaker` or `superadmin`) "
-        "so the dashboard frontend can distinguish which admin is logged in."
+        "Step 1 of the admin login flow. Validates email and password. "
+        "On success, sends a 6-digit OTP to the admin's email address. "
+        "Submit the OTP to `/admin/login/verify/` to receive JWT tokens."
     ),
-    request=AdminLoginSerializer,
+    request=AdminLoginInitiateSerializer,
     responses={
-        200: _admin_login_response_schema,
+        200: _admin_otp_sent_response,
         400: OpenApiResponse(description="Invalid credentials or non-admin role."),
     },
 )
@@ -524,18 +533,94 @@ class AdminLoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = AdminLoginSerializer(data=request.data, context={"request": request})
+        serializer = AdminLoginInitiateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user       = serializer.validated_data["user"]
-        admin_type = serializer.validated_data["admin_type"]
-        return Response(
-            {
-                "message":    f"Welcome back, {user.first_name} {user.last_name}.",
-                "admin_type": admin_type,
-                **_token_response(user, request),
-            },
-            status=status.HTTP_200_OK,
-        )
+        d = serializer.validated_data
+        try:
+            result = AdminLoginOTPService.initiate_login(
+                email=d["email"],
+                password=d["password"],
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Admin login initiation failed.")
+            return Response({"error": "Something went wrong. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    tags=["Auth - Admin"],
+    summary="Admin — Login Step 2: Verify OTP (Matchmaker & Superadmin)",
+    description=(
+        "Step 2 of the admin login flow. Submit the 6-digit OTP sent to the admin's email. "
+        "On success, returns JWT access + refresh tokens. "
+        "Response includes `admin_type` field (`matchmaker` or `superadmin`) "
+        "so the dashboard frontend can distinguish which admin is logged in."
+    ),
+    request=AdminLoginVerifyOTPSerializer,
+    responses={
+        200: _admin_login_response_schema,
+        400: OpenApiResponse(description="Invalid or expired OTP."),
+    },
+)
+class AdminLoginVerifyOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = AdminLoginVerifyOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        try:
+            result = AdminLoginOTPService.verify_otp_and_login(
+                email=d["email"],
+                otp=d["otp"],
+            )
+            user       = result["user"]
+            admin_type = result["admin_type"]
+            return Response(
+                {
+                    "message":       f"Welcome back, {user.first_name} {user.last_name}.",
+                    "admin_type":    admin_type,
+                    "access_token":  result["access_token"],
+                    "refresh_token": result["refresh_token"],
+                    "user":          AdminProfileSerializer(user, context={"request": request}).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Admin OTP verification failed.")
+            return Response({"error": "Something went wrong. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    tags=["Auth - Admin"],
+    summary="Admin — Resend login OTP",
+    description=(
+        "Resend the admin login OTP. Can only be called after Step 1. "
+        "Enforces a 60-second cooldown between resend requests."
+    ),
+    request=AdminResendLoginOTPSerializer,
+    responses={
+        200: _admin_otp_sent_response,
+        400: OpenApiResponse(description="Session not found, cooldown active, or invalid email."),
+    },
+)
+class AdminLoginResendOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = AdminResendLoginOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = AdminLoginOTPService.resend_otp(
+                email=serializer.validated_data["email"],
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

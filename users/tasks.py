@@ -74,6 +74,35 @@ def send_password_reset_otp_email(self, email: str, otp: str, first_name: str, l
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
 
 
+@shared_task(bind=True, max_retries=3, name="users.send_admin_login_otp_email")
+def send_admin_login_otp_email(self, email: str, otp: str, first_name: str, last_name: str):
+    """Send a 6-digit OTP to an admin for login verification."""
+    expiry_minutes = getattr(settings, "OTP_EXPIRY_SECONDS", 300) // 60
+    subject = f"{PLATFORM_NAME} — Admin login verification code"
+    message = (
+        f"As-salamu alaykum {first_name} {last_name or 'there'},\n\n"
+        f"A login attempt was made to your {PLATFORM_NAME} admin account.\n\n"
+        f"Your verification code is:\n\n"
+        f"    {otp}\n\n"
+        f"This code expires in {expiry_minutes} minutes.\n\n"
+        f"If you did not attempt to log in, please secure your account immediately "
+        f"or contact us at {SUPPORT_EMAIL}.\n\n"
+        f"— The {PLATFORM_NAME} Team"
+    )
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
+            fail_silently=False,
+        )
+        logger.info("Admin login OTP sent to %s", email)
+    except Exception as exc:
+        logger.error("Failed to send admin login OTP to %s: %s", email, exc)
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+
 @shared_task(name="users.send_welcome_email")
 def send_welcome_email(email: str, first_name: str, last_name: str):
     """Send a welcome email after successful registration."""

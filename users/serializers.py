@@ -214,19 +214,35 @@ class WaliLoginSerializer(_BaseLoginSerializer):
     blocked_message = "Please use the Male or Female login."
 
 
-class AdminLoginSerializer(_BaseLoginSerializer):
-    """
-    Shared login for both Matchmaker and Superadmin.
-    Response includes `admin_type` so the dashboard can distinguish roles.
-    """
-    allowed_roles   = [UserRole.MATCHMAKER, UserRole.SUPERADMIN]
-    blocked_message = "Admin access required."
+class AdminLoginInitiateSerializer(serializers.Serializer):
+    """Step 1: email + password to kick off admin OTP login."""
+    email    = serializers.EmailField()
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
 
-    def validate(self, data):
-        data = super().validate(data)
-        # Inject admin_type so view can include it in the response
-        data["admin_type"] = data["user"].role
-        return data
+    def validate_email(self, value):
+        return value.lower().strip()
+
+
+class AdminLoginVerifyOTPSerializer(serializers.Serializer):
+    """Step 2: 6-digit OTP to complete admin login and receive JWT tokens."""
+    email = serializers.EmailField()
+    otp   = serializers.CharField(min_length=6, max_length=6)
+
+    def validate_email(self, value):
+        return value.lower().strip()
+
+    def validate_otp(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP must contain digits only.")
+        return value
+
+
+class AdminResendLoginOTPSerializer(serializers.Serializer):
+    """Resend admin login OTP (subject to 60-second cooldown)."""
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.lower().strip()
 
 
 # ── Password management ───────────────────────────────────────────────────────

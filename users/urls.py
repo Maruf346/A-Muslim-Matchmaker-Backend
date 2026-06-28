@@ -22,7 +22,9 @@ Full endpoint map:
     POST /api/user/wali/login/                  WaliLoginView
 
     ── Admin auth ────────────────────────────────────────────────────
-    POST /api/user/admin/login/                 AdminLoginView
+    POST /api/user/admin/login/                 AdminLoginView          (Step 1: submit credentials, sends OTP)
+    POST /api/user/admin/login/verify/          AdminLoginVerifyOTPView (Step 2: submit OTP, receive JWT tokens)
+    POST /api/user/admin/login/resend-otp/      AdminLoginResendOTPView (Resend OTP, 60s cooldown)
     GET  /api/user/admin/profile/               AdminProfileView
     PATCH /api/user/admin/profile/              AdminProfileView
 
@@ -84,8 +86,10 @@ urlpatterns = [
     path("wali/login/",             WaliLoginView.as_view(),                name="wali-login"),
 
     # ── Admin auth ────────────────────────────────────────────────────────────
-    path("admin/login/",   AdminLoginView.as_view(),   name="admin-login"),
-    path("admin/profile/", AdminProfileView.as_view(), name="admin-profile"),
+    path("admin/login/",            AdminLoginView.as_view(),            name="admin-login"),
+    path("admin/login/verify/",     AdminLoginVerifyOTPView.as_view(),   name="admin-login-verify"),
+    path("admin/login/resend-otp/", AdminLoginResendOTPView.as_view(),   name="admin-login-resend-otp"),
+    path("admin/profile/",          AdminProfileView.as_view(),          name="admin-profile"),
 
     # ── Shared auth ───────────────────────────────────────────────────────────
     path("logout/",                  LogoutView.as_view(),                name="logout"),

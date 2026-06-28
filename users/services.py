@@ -329,6 +329,134 @@ class PasswordResetService:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Admin Login OTP Service
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AdminLoginOTPService:
+    """
+    OTP-gated login flow for admin accounts (Matchmaker & Superadmin).
+
+    Flow:
+        Step 1 — initiate_login(email, password)  → validates credentials, sends OTP
+        Step 2 — verify_otp_and_login(email, otp) → verifies OTP, returns JWT tokens
+        Resend — resend_otp(email)                → resends OTP after 60s cooldown
+    """
+
+    _OTP_KEY_PREFIX      = "admin_login_otp:"
+    _COOLDOWN_KEY_PREFIX = "admin_login_otp_cooldown:"
+    _COOLDOWN_SECONDS    = 60
+
+    @classmethod
+    def initiate_login(cls, email: str, password: str) -> dict:
+        from users.models import User, UserRole
+
+        email = email.lower().strip()
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise ValueError("Invalid email or password.")
+
+        if not user.check_password(password):
+            raise ValueError("Invalid email or password.")
+
+        if user.role not in (UserRole.MATCHMAKER, UserRole.SUPERADMIN):
+            raise ValueError("Admin access required.")
+
+        if not user.is_active:
+            if user.deactivated_by_user:
+                raise ValueError(
+                    "Your account has been deactivated. Please contact support to reactivate it."
+                )
+            raise ValueError(
+                "Your account has been blocked. Please contact support for assistance."
+            )
+
+        otp     = OTPService.generate_otp()
+        payload = {"otp": otp, "admin_type": user.role}
+        cache.set(cls._OTP_KEY_PREFIX + email, payload, settings.OTP_EXPIRY_SECONDS)
+        cache.set(cls._COOLDOWN_KEY_PREFIX + email, 1, cls._COOLDOWN_SECONDS)
+
+        try:
+            from users.tasks import send_admin_login_otp_email
+            send_admin_login_otp_email.delay(email, otp, user.first_name, user.last_name)
+        except Exception as exc:
+            logger.error("Failed to queue admin login OTP for %s: %s", email, exc)
+
+        return {
+            "message":            "A verification code has been sent to your email.",
+            "email":              email,
+            "expires_in_seconds": settings.OTP_EXPIRY_SECONDS,
+        }
+
+    @classmethod
+    def verify_otp_and_login(cls, email: str, otp: str) -> dict:
+        from users.models import User
+
+        email     = email.lower().strip()
+        cache_key = cls._OTP_KEY_PREFIX + email
+        payload   = cache.get(cache_key)
+
+        if not payload:
+            raise ValueError("OTP expired or not found. Please restart login.")
+        if payload["otp"] != otp:
+            raise ValueError("Invalid OTP.")
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise ValueError("User not found.")
+
+        cache.delete(cache_key)
+        cache.delete(cls._COOLDOWN_KEY_PREFIX + email)
+
+        from rest_framework_simplejwt.tokens import RefreshToken
+        refresh = RefreshToken.for_user(user)
+
+        return {
+            "user":          user,
+            "admin_type":    payload["admin_type"],
+            "access_token":  str(refresh.access_token),
+            "refresh_token": str(refresh),
+        }
+
+    @classmethod
+    def resend_otp(cls, email: str) -> dict:
+        from users.models import User
+
+        email   = email.lower().strip()
+        otp_key = cls._OTP_KEY_PREFIX + email
+        payload = cache.get(otp_key)
+
+        if not payload:
+            raise ValueError("No active login session found. Please restart login.")
+
+        if cache.get(cls._COOLDOWN_KEY_PREFIX + email):
+            raise ValueError("Please wait 60 seconds before requesting a new OTP.")
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise ValueError("User not found.")
+
+        new_otp        = OTPService.generate_otp()
+        payload["otp"] = new_otp
+        cache.set(otp_key, payload, settings.OTP_EXPIRY_SECONDS)
+        cache.set(cls._COOLDOWN_KEY_PREFIX + email, 1, cls._COOLDOWN_SECONDS)
+
+        try:
+            from users.tasks import send_admin_login_otp_email
+            send_admin_login_otp_email.delay(email, new_otp, user.first_name, user.last_name)
+        except Exception as exc:
+            logger.error("Failed to resend admin login OTP for %s: %s", email, exc)
+
+        return {
+            "message":            "A new verification code has been sent to your email.",
+            "email":              email,
+            "expires_in_seconds": settings.OTP_EXPIRY_SECONDS,
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Matchmaker Management Service  (superadmin only)
 # ─────────────────────────────────────────────────────────────────────────────
 
