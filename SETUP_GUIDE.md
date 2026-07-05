@@ -139,3 +139,4 @@ Once you do have AWS, you'll need on the EC2 instance:
 | Redis | — (not exposed to host) | 6379 |
 
 Everything routes through Nginx on **8001** — that's the only port you need to remember for local development.
+
