@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'wishlists',
     'chat',
     'matchmaking',
+    'private_matches',
 ]
 
 MIDDLEWARE = [
