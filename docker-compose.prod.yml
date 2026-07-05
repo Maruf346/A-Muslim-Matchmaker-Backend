@@ -42,12 +42,12 @@ services:
     image: nginx:1.25-alpine
     container_name: amm_nginx
     ports:
-      - "80:80"        # HTTP — Elastic IP hits this
-      # Port 443 will be added after SSL/domain setup
+      - "80:80"        # HTTP
+      - "443:443"      # HTTPS — Added for SSL
     volumes:
       - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - static_data:/app/staticfiles:ro
-      # No media volume — media is served from S3
+      - /etc/letsencrypt:/etc/letsencrypt:ro  # Mount SSL certs directory
     depends_on:
       django:
         condition: service_healthy
