@@ -86,7 +86,7 @@ docker compose exec django python manage.py createsuperuser
 If port 8001 is ever busy too, change only the **left side** of the ports mapping in `docker-compose.yml`:
 ```yaml
 ports:
-  - "8001:80"   # change "8001" to any free port; right side (80) stays the same
+  - "8001:80"   # change "8001" to any free port; right side (80) stays the same   
 ```
 
 ---
