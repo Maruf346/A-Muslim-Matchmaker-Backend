@@ -115,7 +115,7 @@ That's the only secret CI actually needs, since CI uses SQLite + console email b
 
 ### Also needed on the EC2 server itself (NOT GitHub Secrets — these live on the server):
 
-Once you do have AWS, you'll need on the EC2 instance:
+Once you do have AWS, you'll need on the EC2 instance:    
 1. A cloned copy of the repo at `~/amm-backend`
 2. A `.env.production` file (same shape as `.env.example`, but with real production values — `DEBUG=False`, real `SECRET_KEY`, real Postgres credentials if you switch from SQLite, real `ALLOWED_HOSTS` with your actual domain, etc.) 
 3. A `docker-compose.prod.yml` file — **this doesn't exist yet**. It's referenced by `deploy.yml` but needs to be created separately (it's typically `docker-compose.yml` minus the bind-mount `- .:/app` line, since production should run the baked image, not live-reload from source). I can build this file with you once you're ready to set up the AWS side — just let me know.
