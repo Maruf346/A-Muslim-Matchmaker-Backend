@@ -93,49 +93,50 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 
 
-# SECURITY SETTINGS FOR PRODUCTION
-# if not DEBUG:
-#     SECURE_SSL_REDIRECT          = False  # Nginx handles SSL termination
-#     SECURE_PROXY_SSL_HEADER      = ("HTTP_X_FORWARDED_PROTO", "https")
-#     USE_X_FORWARDED_HOST         = True
-#     SESSION_COOKIE_SECURE        = True
-#     CSRF_COOKIE_SECURE           = True
-#     SECURE_BROWSER_XSS_FILTER    = True
-#     SECURE_CONTENT_TYPE_NOSNIFF  = True
-#     X_FRAME_OPTIONS              = "DENY"
-#     # Only enable HSTS after SSL is confirmed working
-#     # Uncomment these AFTER you have SSL set up — wrong HSTS can lock out your site
-#     # SECURE_HSTS_SECONDS          = 31536000
-#     # SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-#     # SECURE_HSTS_PRELOAD          = True
+# ── Security Settings ────────────────────────────────────────────────────────
+# These are activated automatically when DEBUG=False (i.e. in production).
+# Nginx terminates HTTP on port 80; after adding SSL, set SECURE_SSL_REDIRECT=True.
+if not DEBUG:
+    # Nginx forwards the real client IP via X-Forwarded-For
+    USE_X_FORWARDED_HOST         = True
+    SECURE_PROXY_SSL_HEADER      = ("HTTP_X_FORWARDED_PROTO", "https")
+    # Don't redirect HTTP→HTTPS yet (we're on HTTP until domain+SSL is set up)
+    SECURE_SSL_REDIRECT          = False
+    SESSION_COOKIE_SECURE        = False  # Set True after SSL is configured
+    CSRF_COOKIE_SECURE           = False  # Set True after SSL is configured
+    SECURE_BROWSER_XSS_FILTER    = True
+    SECURE_CONTENT_TYPE_NOSNIFF  = True
+    X_FRAME_OPTIONS              = "SAMEORIGIN"
+    # Enable these ONLY after SSL is working and tested:
+    # SECURE_HSTS_SECONDS          = 31536000
+    # SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    # SECURE_HSTS_PRELOAD          = True
 
-# # CORS SETTINGS
-# CORS_ALLOWED_ORIGINS = os.getenv(
-#     'CORS_ALLOWED_ORIGINS',
-#     'http://localhost:3000'
-# ).split(',')
+# ── CORS & CSRF Settings ─────────────────────────────────────────────────────
+_cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
+if _cors_origins_env:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins_env.split(',') if o.strip()]
+    CORS_ALLOW_ALL_ORIGINS = False
+else:
+    # Development fallback — allow all
+    CORS_ALLOW_ALL_ORIGINS = True
 
-# CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = True
 
-# # CORS configs
-# CSRF_TRUSTED_ORIGINS = [
-#     f"http://{host}" for host in ALLOWED_HOSTS if host not in ('localhost', 'localhost:80', '127.0.0.1', '')
-# ] + [
-#     f"https://{host}" for host in ALLOWED_HOSTS if host not in ('localhost', 'localhost:80', '127.0.0.1', '')
-# ] + [
-#     "https://7b2k279j-80.aue.devtunnels.ms"
-# ] 
-
-CSRF_TRUSTED_ORIGINS = [
+# CSRF trusted origins: built from ALLOWED_HOSTS + any extra origins
+_csrf_trusted = set([
     "http://localhost",
     "http://localhost:80",
     "http://127.0.0.1",
-
-    "http://10.10.20.45",
     "https://*.devtunnels.ms",
-]
-
-CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins (for development only, not recommended for production)
+])
+# Add any extra origins from CORS_ALLOWED_ORIGINS to CSRF_TRUSTED_ORIGINS
+if _cors_origins_env:
+    for _origin in _cors_origins_env.split(','):
+        _origin = _origin.strip()
+        if _origin:
+            _csrf_trusted.add(_origin)
+CSRF_TRUSTED_ORIGINS = list(_csrf_trusted)
 
 
 
@@ -244,18 +245,61 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-
-# Static and media files settings
+# Static files — always served from local volume via Nginx
 STATIC_URL  = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-MEDIA_URL  = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# ── Media / File Storage ─────────────────────────────────────────────────────
+# In production (DEBUG=False): media files go to AWS S3.
+# In development (DEBUG=True):  media files stay on local filesystem.
+#
+# Required env vars for S3 (set in .env.production):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_STORAGE_BUCKET_NAME,
+#   AWS_S3_REGION_NAME (e.g. eu-north-1)
 
+_USE_S3 = os.getenv('USE_S3', 'False') == 'True'
 
-# WhiteNoise — serves static files efficiently in production
-# Already have whitenoise in MIDDLEWARE, this adds compression + caching
-# STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+if _USE_S3:
+    # ── AWS S3 Configuration ─────────────────────────────────────────────
+    AWS_ACCESS_KEY_ID       = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY   = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME      = os.getenv('AWS_S3_REGION_NAME', 'eu-north-1')
+    AWS_S3_CUSTOM_DOMAIN    = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
+    AWS_S3_FILE_OVERWRITE   = False    # Don't overwrite files with same name
+    AWS_DEFAULT_ACL         = None     # Use bucket policy, not object ACL
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+    }
+
+    # Media files → S3
+    STORAGES = {
+        'default': {
+            'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+            'OPTIONS': {
+                'bucket_name': AWS_STORAGE_BUCKET_NAME,
+                'location': 'media',          # Files go into /media/ prefix in bucket
+                'file_overwrite': False,
+            },
+        },
+        # Static files → local (served by Nginx from Docker volume)
+        'staticfiles': {
+            'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+        },
+    }
+
+    MEDIA_URL  = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
+    MEDIA_ROOT = None   # Not used when storing on S3
+
+    # CKEditor 5 uploads → S3
+    CKEDITOR_5_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+
+else:
+    # ── Local filesystem (development) ──────────────────────────────────
+    MEDIA_URL  = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
+    # CKEditor 5 uploads → local
+    CKEDITOR_5_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -511,59 +555,56 @@ CKEDITOR_5_CONFIGS = {
 
 # CKEditor 5 file upload settings
 CKEDITOR_5_UPLOAD_PATH = "uploads/"
-CKEDITOR_5_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
+# Note: CKEDITOR_5_FILE_STORAGE is set dynamically above in the media/storage section
 
 
-# Rate Limiting Configuration
-# RATELIMIT_ENABLE = os.getenv('RATELIMIT_ENABLE', 'False') == 'True'
-# RATELIMIT_USE_CACHE = 'default'  # Use Redis cache
-# RATELIMIT_VIEW_403 = True  # Return 403 instead of default behavior
-
-# Optional: Custom rate limit failure response
-# RATELIMIT_FAIL_OPEN = False  # If True, allows requests when rate limit backend fails
-
-# Logging for rate limits (optional)
-# LOGGING = {
-#     'version': 1,
-#     'disable_existing_loggers': False,
-#     'formatters': {
-#         'verbose': {
-#             'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-#             'style': '{',
-#         },
-#         'simple': {
-#             'format': '{levelname} {message}',
-#             'style': '{',
-#         },
-#     },
-#     'handlers': {
-#         'console': {
-#             'class': 'logging.StreamHandler',
-#             'formatter': 'verbose',
-#         },
-#     },
-#     'root': {
-#         'handlers': ['console'],
-#         'level': 'INFO',
-#     },
-#     'loggers': {
-#         'django': {
-#             'handlers': ['console'],
-#             'level': 'WARNING' if not DEBUG else 'INFO',
-#             'propagate': False,
-#         },
-#         'django.ratelimit': {
-#             'handlers': ['console'],
-#             'level': 'WARNING',
-#             'propagate': False,
-#         },
-#         'celery': {
-#             'handlers': ['console'],
-#             'level': 'INFO',
-#             'propagate': False,
-#         },
-#     },
-# }
+# ── Logging ───────────────────────────────────────────────────────────────────
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING' if not DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'storages': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+    },
+}
 
 
 

@@ -52,11 +52,11 @@ elif [ "$SERVICE_TYPE" = "celery_worker" ]; then
 # ──────────────────────────────────────────────────────────────────────────────
 
     echo "  Starting Celery Worker..."
-    # --pool=solo avoids fork issues on some Docker environments (Windows/macOS).
-    # Switch to --pool=prefork on Linux production for better throughput.
+    # --pool=prefork is the production default on Linux for better throughput.
+    # On Windows/macOS Docker Desktop, use --pool=solo to avoid fork() issues.
     exec celery -A core worker \
         --loglevel=info \
-        --pool=solo \
+        --pool=prefork \
         --concurrency=4
 
 # ──────────────────────────────────────────────────────────────────────────────

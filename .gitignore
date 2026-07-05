@@ -260,5 +260,12 @@ celerybeat.pid
 *.swo
 GITHUB_SECRETS_GUIDE.md
 
+# Docker production files (must be tracked — deployed to EC2)
+# docker-compose.prod.yml  <- tracked (needed on EC2)
+# nginx.prod.conf          <- tracked (needed on EC2)
+
+# Explicitly allow production example file
+!.env.production.example
+
 /.refact
 /.continue

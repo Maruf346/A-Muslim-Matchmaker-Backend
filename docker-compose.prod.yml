@@ -1,0 +1,129 @@
+# ──────────────────────────────────────────────────────────────────────────────
+#  AMM (A Muslim Matchmaker) — Production Docker Compose
+#
+#  Key differences from docker-compose.yml (dev):
+#    - No bind-mount of source code (no .:/app) — uses baked image
+#    - No SQLite volume — uses AWS RDS PostgreSQL
+#    - No media volume — media served from AWS S3
+#    - Celery uses prefork pool (not solo) for better throughput on Linux
+#    - Nginx listens on port 80 (Elastic IP / ALB in front)
+#    - All secrets come from .env.production (NOT committed to git)
+#
+#  Usage on EC2:
+#    docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#    docker compose -f docker-compose.prod.yml --env-file .env.production down
+#    docker compose -f docker-compose.prod.yml --env-file .env.production logs -f django
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Shared config for all Django-based services
+x-django-base: &django-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env.production
+  environment:
+    REDIS_HOST: redis
+    REDIS_PORT: "6379"
+  depends_on:
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  # No source bind-mount in production — image is immutable
+  # Media served from S3, so no media volume needed
+  volumes:
+    - static_data:/app/staticfiles
+
+
+services:
+
+  # ── Nginx ─────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: amm_nginx
+    ports:
+      - "80:80"        # HTTP — Elastic IP hits this
+      # Port 443 will be added after SSL/domain setup
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - static_data:/app/staticfiles:ro
+      # No media volume — media is served from S3
+    depends_on:
+      django:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Django / Daphne ───────────────────────────────────────────────────────
+  django:
+    <<: *django-base
+    container_name: amm_django
+    environment:
+      SERVICE_TYPE: django
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    # Django is NOT exposed to the host — Nginx is the only entry point
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/docs/')"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s   # RDS connection + migrations take longer than SQLite
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────
+  celery_worker:
+    <<: *django-base
+    container_name: amm_celery_worker
+    environment:
+      SERVICE_TYPE: celery_worker
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_healthy   # Wait for migrations before processing tasks
+
+  # ── Celery Beat ───────────────────────────────────────────────────────────
+  celery_beat:
+    <<: *django-base
+    container_name: amm_celery_beat
+    environment:
+      SERVICE_TYPE: celery_beat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_healthy   # Beat stores schedule in DB — needs migrations first
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: amm_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Redis is NOT exposed to the host — only accessible within Docker network
+    expose:
+      - "6379"
+
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+# Media is on S3, so no media_data volume here.
+# No SQLite volume — using AWS RDS PostgreSQL.
+volumes:
+  static_data:    # Django collectstatic output (served by Nginx)
+  redis_data:     # Redis AOF persistence (broker + cache + channel layer)
