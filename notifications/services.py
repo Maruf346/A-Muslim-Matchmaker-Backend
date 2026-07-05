@@ -430,6 +430,57 @@ class NotificationTemplates:
             priority=NotificationPriority.HIGH,
         )
 
+    @staticmethod
+    def private_matchmaking_approved(user) -> "Notification | None":
+        return NotificationService.send(
+            user=user,
+            notification_type=NotificationType.PRIVATE_MATCHMAKING_APPROVED,
+            title="Private Matchmaking Request Approved ✅",
+            body=(
+                "Congratulations! Your private matchmaking request has been approved. "
+                "Your matchmaker will be in touch shortly via in-app chat."
+            ),
+            priority=NotificationPriority.HIGH,
+        )
+ 
+    @staticmethod
+    def private_matchmaking_declined(user, reason: str = "") -> "Notification | None":
+        body = "Your private matchmaking request was not approved at this time."
+        if reason:
+            body += f" Note: {reason}"
+        return NotificationService.send(
+            user=user,
+            notification_type=NotificationType.PRIVATE_MATCHMAKING_DECLINED,
+            title="Private Matchmaking Request Declined",
+            body=body,
+            priority=NotificationPriority.NORMAL,
+        )
+ 
+    @staticmethod
+    def private_match_update(user, message: str, suggestion_id: str) -> "Notification | None":
+        "Sent to admin when client or prospect responds to a private match suggestion."
+        return NotificationService.send_to_all_admins(
+            notification_type=NotificationType.PRIVATE_MATCH_UPDATE,
+            title="Private Match Update",
+            body=message,
+            data={"suggestion_id": suggestion_id},
+        )
+ 
+    @staticmethod
+    def special_match_received(prospect, suggestion_id: str) -> "Notification | None":
+        "Sent to prospect when private client says YES."
+        return NotificationService.send(
+            user=prospect,
+            notification_type=NotificationType.SPECIAL_MATCH_RECEIVED,
+            title="You Have Received a Special Match 🌹",
+            body=(
+                "You have received a Special Match personally suggested by one of our "
+                "Matchmakers. Open the app to view the profile."
+            ),
+            data={"suggestion_id": suggestion_id},
+            priority=NotificationPriority.HIGH,
+        )
+
     # ── Admin-only alerts ─────────────────────────────────────────────────────
 
     @staticmethod

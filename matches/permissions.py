@@ -51,6 +51,11 @@ class CanSendConnectionRequest(BasePermission):
         user = request.user
         if not user or not user.is_authenticated:
             return False
+        
+        # Private matchmaking clients cannot send standard connection requests
+        if user.is_private_matchmaking_client:
+            return False
+        
         # Free users cannot send requests at all
         if user.subscription_plan == "free":
             return False

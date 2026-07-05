@@ -18,6 +18,8 @@ urlpatterns = [
     path('matches/', include('matches.urls')),
     path('supports/', include('supports.urls')),
     path('chat/', include('chat.urls')),
+    path('matchmaking/', include('matchmaking.urls')),
+    path('private-matches/', include('private_matches.urls')),
 
     #JWT endpoints
     # path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),

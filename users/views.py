@@ -1064,6 +1064,30 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response({"message": msg}, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        tags=["Admin - Users"],
+        summary="Admin — Update a user's profile fields",
+        description=(
+            "Update editable User model fields for any user: "
+            "`first_name`, `last_name`, `profile_picture`. "
+            "This does NOT update BasicInfo fields — use the questions app endpoint for that."
+        ),
+        request=UpdateProfileSerializer,
+        responses={200: AdminUserListSerializer},
+    )
+    @action(detail=True, methods=["patch"], url_path="update-profile",
+            parser_classes=[MultiPartParser, FormParser, JSONParser])
+    def update_profile(self, request, pk=None):
+        user = self.get_object()
+        from users.serializers import UpdateProfileSerializer
+        serializer = UpdateProfileSerializer(user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            AdminUserListSerializer(user, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ADMIN — MATCHMAKER MANAGEMENT  (Superadmin only)

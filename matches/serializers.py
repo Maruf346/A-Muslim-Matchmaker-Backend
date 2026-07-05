@@ -163,6 +163,9 @@ class SendConnectionRequestSerializer(serializers.Serializer):
         if target.role not in (UserRole.FEMALE, UserRole.WALI):
             raise serializers.ValidationError("Connection requests can only be sent to Female or Wali profiles.")
 
+        if target.is_private_matchmaking_client: 
+            raise ValidationError("Not available.")
+        
         request = self.context.get("request")
         if request and target == request.user:
             raise serializers.ValidationError("You cannot send a connection request to yourself.")

@@ -132,6 +132,9 @@ class DirectoryListView(APIView):
         if excluded_ids:
             qs = qs.exclude(id__in=excluded_ids)
 
+        # Always exclude private matchmaking clients from standard directory
+        qs = qs.filter(is_private_matchmaking_client=False)
+
         # ── online / new filters ─────────────────────────────────────────────
         if request.query_params.get("online") == "true":
             cutoff = timezone.now() - timedelta(minutes=5)

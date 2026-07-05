@@ -58,6 +58,10 @@ class NotificationType(models.TextChoices):
     # ── Private Matchmaking ───────────────────────────────────────────────────
     PRIVATE_MATCHMAKING_REQUESTED   = "private_matchmaking_requested",  "Private Matchmaking Requested"
     PRIVATE_MATCHMAKING_CONFIRMED   = "private_matchmaking_confirmed",  "Private Matchmaking Confirmed"
+    PRIVATE_MATCHMAKING_APPROVED    = "pm_approved",   "Private Matchmaking Approved"
+    PRIVATE_MATCHMAKING_DECLINED    = "pm_declined",   "Private Matchmaking Declined"
+    PRIVATE_MATCH_UPDATE            = "pm_match_update", "Private Match Update"
+    SPECIAL_MATCH_RECEIVED          = "special_match_received", "Special Match Received"
 
     # ── Admin-only alerts ─────────────────────────────────────────────────────
     NEW_USER_JOINED                 = "new_user_joined",                "New User Joined"

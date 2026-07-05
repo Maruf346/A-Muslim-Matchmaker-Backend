@@ -35,6 +35,7 @@ Full endpoint map:
 
     ── Admin ─────────────────────────────────────────────────────────────────
     GET  /api/questions/admin/users/<user_id>/      AdminUserBasicInfoView
+    PATCH /api/questions/admin/users/<user_id>/     AdminUserBasicInfoView
 """
 
 from django.urls import path

@@ -278,6 +278,15 @@ class User(AbstractUser):
             "False when blocked by admin. Only meaningful when is_active=False."
         ),
     )
+    is_private_matchmaking_client = models.BooleanField(
+        default=False,
+        verbose_name=_("Private Matchmaking Client"),
+        help_text=(
+            "True when admin/matchmaker has approved this user as a private "
+            "matchmaking client. Hides them from the standard directory and "
+            "disables standard connection requests to/from them."
+        ),
+    )
 
     # ── Online presence ───────────────────────────────────────────────────────
     last_active = models.DateTimeField(

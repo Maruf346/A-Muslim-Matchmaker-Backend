@@ -597,3 +597,65 @@ class AdminUserBasicInfoView(APIView):
             {"error": f"Basic info is not applicable for role: {user.role}."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+        
+    @extend_schema(
+        tags=["Basic Info - Admin"],
+        summary="Admin — Update any user's basic info",
+        description=(
+            "Partially update the basic info for the specified user. "
+            "Routes to the correct model based on user role. "
+            "All fields are optional — only submitted fields are updated. "
+            "For Wali users, pass `target`: `wali_profile` or `sister_info` "
+            "to indicate which record to update (defaults to `sister_info`)."
+        ),
+        parameters=[
+            OpenApiParameter("user_id", str, location="path", description="User UUID."),
+            OpenApiParameter(
+                "target", str,
+                description="For Wali only: `wali_profile` or `sister_info` (default).",
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(description="Updated basic info."),
+            404: OpenApiResponse(description="User not found."),
+            400: OpenApiResponse(description="Validation error or unsupported role."),
+        },
+    )
+    def patch(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+ 
+        ctx = {"request": request}
+ 
+        if user.role == "male":
+            obj, _ = MaleBasicInfo.objects.get_or_create(user=user)
+            serializer = MaleBasicInfoSerializer(obj, data=request.data, partial=True, context=ctx)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+ 
+        if user.role == "female":
+            obj, _ = FemaleBasicInfo.objects.get_or_create(user=user)
+            serializer = FemaleBasicInfoSerializer(obj, data=request.data, partial=True, context=ctx)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+ 
+        if user.role == "wali":
+            target = request.query_params.get("target", "sister_info")
+            if target == "wali_profile":
+                obj, _ = WaliProfile.objects.get_or_create(user=user)
+                serializer = WaliProfileSerializer(obj, data=request.data, partial=True, context=ctx)
+            else:
+                obj, _ = WaliBasicInfo.objects.get_or_create(user=user)
+                serializer = WaliBasicInfoSerializer(obj, data=request.data, partial=True, context=ctx)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+ 
+        return Response(
+            {"error": f"Basic info is not applicable for role: {user.role}."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
