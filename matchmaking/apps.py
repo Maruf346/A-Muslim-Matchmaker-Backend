@@ -1,5 +1,11 @@
+"""
+matchmaking/apps.py
+"""
+
 from django.apps import AppConfig
 
 
 class MatchmakingConfig(AppConfig):
-    name = 'matchmaking'
+    default_auto_field = "django.db.models.BigAutoField"
+    name               = "matchmaking"
+    verbose_name       = "Private Matchmaking"
