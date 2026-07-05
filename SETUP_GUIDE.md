@@ -124,7 +124,7 @@ Once you do have AWS, you'll need on the EC2 instance:
 
 ## 5. What's NOT yet wired up — flagging for awareness
 
-- `docker-compose.prod.yml` doesn't exist yet (mentioned above) — `deploy.yml` references it but it needs to be created when you're ready for the AWS phase.
+- `docker-compose.prod.yml` doesn't exist yet (mentioned above) — `deploy.yml` references it but it needs to be created when you're ready for the AWS phase.    
 - The `supports` app referenced in `INSTALLED_APPS` doesn't exist on disk in anything we've built so far — remove it from the list for now if Django complains on boot, or let me know if that's a different app you're planning to add (e.g. a customer-support ticketing app) and we can build it.
 - CI's `python manage.py test` step will currently report "0 tests ran" since no test files exist yet in any app — this is expected and won't fail the build, but it's worth knowing it's not actually testing any of our logic yet. We can add real tests for the auth flow, match lifecycle, etc. whenever you'd like to prioritize that.
 
