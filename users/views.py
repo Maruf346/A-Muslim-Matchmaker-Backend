@@ -63,7 +63,7 @@ def _handle_registration_complete(user, request=None) -> None:
     """Fire post-registration side effects — non-blocking."""
     try:
         from users.tasks import send_welcome_email
-        send_welcome_email.delay(user.email, f"{user.first_name} {user.last_name}")
+        send_welcome_email.delay(user.email, user.first_name, user.last_name)
         NotificationTemplates.welcome(user)
         NotificationTemplates.new_user_joined(user)
     except Exception:

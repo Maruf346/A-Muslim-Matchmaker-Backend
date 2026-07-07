@@ -375,7 +375,7 @@ class _BaseOAuthSerializer(serializers.Serializer):
     def _post_registration_hooks(self, user):
         try:
             from users.tasks import send_welcome_email
-            send_welcome_email.delay(user.email, user.first_name)
+            send_welcome_email.delay(user.email, user.first_name, user.last_name)
             from notifications.services import NotificationTemplates
             NotificationTemplates.welcome(user)
             NotificationTemplates.new_user_joined(user)

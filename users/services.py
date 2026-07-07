@@ -123,7 +123,7 @@ class RegistrationService:
 
         try:
             from users.tasks import send_registration_otp_email
-            send_registration_otp_email.delay(email, otp, f"{first_name} {last_name}")
+            send_registration_otp_email.delay(email, otp, first_name, last_name)
         except Exception as exc:
             logger.error("Failed to queue registration OTP email for %s: %s", email, exc)
 
@@ -226,7 +226,12 @@ class RegistrationService:
 
         try:
             from users.tasks import send_registration_otp_email
-            send_registration_otp_email.delay(email, new_otp, f"{payload.get('first_name', '')} {payload.get('last_name', '')}")
+            send_registration_otp_email.delay(
+                email,
+                new_otp,
+                payload.get("first_name", ""),
+                payload.get("last_name", ""),
+            )
         except Exception as exc:
             logger.error("Failed to resend OTP for %s: %s", email, exc)
 
@@ -275,7 +280,7 @@ class PasswordResetService:
 
         try:
             from users.tasks import send_password_reset_otp_email
-            send_password_reset_otp_email.delay(email, otp, f"{user.first_name} {user.last_name}")
+            send_password_reset_otp_email.delay(email, otp, user.first_name, user.last_name)
         except Exception as exc:
             logger.error("Failed to queue password reset OTP for %s: %s", email, exc)
 
