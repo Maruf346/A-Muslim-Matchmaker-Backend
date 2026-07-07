@@ -1,6 +1,6 @@
 # AMM — Docker & CI/CD Setup Guide
 
-This guide walks through every change needed to get AMM running locally via Docker on port 8001, and to have CI/CD working end-to-end (with deployment secrets left empty until AWS is ready).
+This guide walks through every change needed to get AMM running locally via Docker on port 8001, and to have CI/CD working end-to-end (with deployment secrets left empty until AWS is ready). 
 
 ---
 
