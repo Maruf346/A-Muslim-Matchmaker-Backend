@@ -16,6 +16,7 @@ import string
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -171,30 +172,53 @@ class RegistrationService:
 
         gender = cls._GENDER_MAP.get(role)
 
-        user = User.objects.create(
-            email=email,
-            first_name=payload["first_name"],
-            last_name=payload["last_name"],
-            password=payload["password"],   # already hashed
-            role=role_map[role],
-            gender=gender,
-            is_active=True,
-            is_staff=False,
-            is_superuser=False,
-            provider=AuthProvider.SELF,
-        )
+        with transaction.atomic():
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    "first_name": payload["first_name"],
+                    "last_name": payload["last_name"],
+                    "password": payload["password"],   # already hashed
+                    "role": role_map[role],
+                    "gender": gender,
+                    "is_active": True,
+                    "is_staff": False,
+                    "is_superuser": False,
+                    "provider": AuthProvider.SELF,
+                },
+            )
 
-        # Assign unique codename
-        from .models import generate_codename
-        codename = generate_codename(role=role_map[role])
-        user.codename = codename
-        user.save(update_fields=["codename"])
+            if not created:
+                # Recover from a previously half-finished registration attempt.
+                update_fields = []
+                for field, value in (
+                    ("first_name", payload["first_name"]),
+                    ("last_name", payload["last_name"]),
+                    ("role", role_map[role]),
+                    ("gender", gender),
+                    ("is_active", True),
+                    ("is_staff", False),
+                    ("is_superuser", False),
+                    ("provider", AuthProvider.SELF),
+                ):
+                    if getattr(user, field) != value:
+                        setattr(user, field, value)
+                        update_fields.append(field)
 
-        # Create default settings
-        UserSettings.objects.create(user=user)
+                if update_fields:
+                    user.save(update_fields=update_fields)
 
-        # Clear OTP cache
-        cache.delete(cache_key)
+            # Ensure codename exists exactly once.
+            if not user.codename:
+                from .models import generate_codename
+                user.codename = generate_codename(role=role_map[role])
+                user.save(update_fields=["codename"])
+
+            # Signal already creates settings; keep this idempotent for retries.
+            UserSettings.objects.get_or_create(user=user)
+
+            # Clear OTP cache only after the DB work succeeds.
+            cache.delete(cache_key)
 
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
