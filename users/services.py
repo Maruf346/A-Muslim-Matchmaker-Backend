@@ -516,7 +516,10 @@ class MatchmakerService:
         )
         user.set_password(password)
         user.save(update_fields=["password"])
-        UserSettings.objects.create(user=user)
+
+        # UserSettings is created by the post_save signal; keep this idempotent
+        # in case the signal was skipped in an unusual execution path.
+        UserSettings.objects.get_or_create(user=user)
         return user
 
     @staticmethod
