@@ -33,6 +33,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from django_filters.rest_framework import DjangoFilterBackend
 
 from notifications.services import NotificationTemplates
 
@@ -1014,7 +1015,7 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
     """
     permission_classes = [IsAdminUser]
     serializer_class   = AdminUserListSerializer
-    filter_backends    = [SearchFilter, OrderingFilter]
+    filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     search_fields      = ["first_name", "last_name", "email", "codename"]
     ordering_fields    = ["created_at", "last_active", "first_name", "last_name"]
     ordering           = ["-created_at"]
