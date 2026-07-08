@@ -144,7 +144,6 @@ if _cors_origins_env:
 CSRF_TRUSTED_ORIGINS = list(_csrf_trusted)
 
 
-
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
