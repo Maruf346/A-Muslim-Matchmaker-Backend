@@ -129,6 +129,11 @@ _csrf_trusted = set([
     "http://localhost:80",
     "http://127.0.0.1",
     "https://*.devtunnels.ms",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://admin.amuslimmatchmaker.com",
+    "https://api.amuslimmatchmaker.com",
+    "https://tgcg8q7d-5173.inc1.devtunnels.ms",
 ])
 # Add any extra origins from CORS_ALLOWED_ORIGINS to CSRF_TRUSTED_ORIGINS
 if _cors_origins_env:
