@@ -17,6 +17,8 @@ Swagger tag strategy:
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
+from django_filters import rest_framework as filters
 from drf_spectacular.utils import (
     OpenApiParameter,
     OpenApiResponse,
@@ -37,7 +39,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from notifications.services import NotificationTemplates
 
-from .models import UserRole
+from .models import SubscriptionPlan, UserRole
 from .permissions import IsAdminUser, IsNormalUser, IsSuperAdmin
 from .serializers import *
 from .services import *
@@ -115,6 +117,28 @@ _admin_otp_sent_response = inline_serializer(
         "expires_in_seconds": drf_serializers.IntegerField(),
     },
 )
+
+
+class AdminUserFilterSet(filters.FilterSet):
+    role = filters.ChoiceFilter(field_name="role", choices=UserRole.choices)
+    gender = filters.CharFilter(method="filter_gender")
+    subscription_plan = filters.ChoiceFilter(
+        field_name="subscription_plan",
+        choices=SubscriptionPlan.choices,
+    )
+    is_active = filters.BooleanFilter(field_name="is_active")
+
+    class Meta:
+        model = User
+        fields = ["role", "gender", "subscription_plan", "is_active"]
+
+    def filter_gender(self, queryset, name, value):
+        value = (value or "").strip().lower()
+        if value == "female":
+            return queryset.filter(Q(gender="female") | Q(role=UserRole.WALI))
+        if value == "male":
+            return queryset.filter(gender="male")
+        return queryset.filter(gender=value)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -995,7 +1019,11 @@ class AdminProfileView(APIView):
         ),
         parameters=[
             OpenApiParameter("role",              str,  description="Filter by role: `male`, `female`, `wali`."),
-            OpenApiParameter("gender",            str,  description="Filter by gender: `male`, `female`."),
+            OpenApiParameter(
+                "gender",
+                str,
+                description="Filter by gender: `male`, `female` (female also includes wali profiles).",
+            ),
             OpenApiParameter("subscription_plan", str,  description="Filter by plan: `free`, `monthly`, `annual`."),
             OpenApiParameter("is_active",         bool, description="Filter by active status."),
             OpenApiParameter("search",            str,  description="Search by first_name, last_name, email, or codename."),
@@ -1019,7 +1047,7 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields      = ["first_name", "last_name", "email", "codename"]
     ordering_fields    = ["created_at", "last_active", "first_name", "last_name"]
     ordering           = ["-created_at"]
-    filterset_fields   = ["role", "gender", "subscription_plan", "is_active"]
+    filterset_class    = AdminUserFilterSet
 
     def get_queryset(self):
         return User.objects.filter(
