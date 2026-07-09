@@ -1052,7 +1052,12 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return User.objects.filter(
             role__in=[UserRole.MALE, UserRole.FEMALE, UserRole.WALI]
-        ).select_related("settings")
+        ).select_related(
+            "settings",
+            "male_basic_info",
+            "female_basic_info",
+            "wali_basic_info",
+        )
 
     @extend_schema(
         tags=["Admin - Users"],

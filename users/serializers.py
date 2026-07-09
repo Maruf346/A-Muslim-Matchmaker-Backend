@@ -16,6 +16,7 @@ import requests as req
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from google.auth.transport import requests as google_requests
@@ -720,6 +721,12 @@ class AdminUserListSerializer(serializers.ModelSerializer):
     Used in admin dashboard to list/search/filter all users.
     """
     last_active_display = serializers.SerializerMethodField()
+    date_of_birth = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
+    sect = serializers.SerializerMethodField()
+    city = serializers.SerializerMethodField()
+    country = serializers.SerializerMethodField()
+    profile_completion_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -733,6 +740,12 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             "gender",
             "subscription_plan",
             "is_verified",
+            "date_of_birth",
+            "age",
+            "sect",
+            "city",
+            "country",
+            "profile_completion_percentage",
             "is_active",
             "deactivated_by_user",
             "is_private_matchmaking_client",
@@ -755,6 +768,47 @@ class AdminUserListSerializer(serializers.ModelSerializer):
         if seconds < 86400:
             return f"Active {seconds // 3600} hr(s) ago"
         return f"Active {seconds // 86400} day(s) ago"
+
+    def _get_basic_info(self, obj):
+        """
+        Return the role-appropriate basic info object for the admin list.
+        Wali uses the sister-facing basic info record because that is where the
+        profile completion / DOB / location fields live.
+        """
+        try:
+            if obj.role == UserRole.MALE:
+                return obj.male_basic_info
+            if obj.role == UserRole.FEMALE:
+                return obj.female_basic_info
+            if obj.role == UserRole.WALI:
+                return obj.wali_basic_info
+        except ObjectDoesNotExist:
+            return None
+        return None
+
+    def get_date_of_birth(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "date_of_birth", None) if info else None
+
+    def get_age(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "age", None) if info else None
+
+    def get_sect(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "sect", None) if info else None
+
+    def get_city(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "city", None) if info else None
+
+    def get_country(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "country", None) if info else None
+
+    def get_profile_completion_percentage(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "completion_percentage", None) if info else None
 
 
 class AdminBlockUserSerializer(serializers.Serializer):
