@@ -1,4 +1,4 @@
-"""
+﻿"""
 users/views.py
 
 Swagger tag strategy:
@@ -1095,7 +1095,36 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(
         tags=["Admin - Users"],
-        summary="Admin — Update a user's profile fields",
+        summary="Admin - Verify or unverify a user",
+        description=(
+            "Set `is_verified=true` to mark a user as verified, or `is_verified=false` "
+            "to remove verification. Intended for admin dashboard management."
+        ),
+        request=AdminToggleVerificationSerializer,
+        responses={
+            200: _message_response,
+            400: OpenApiResponse(description="Validation error."),
+        },
+    )
+    @action(detail=True, methods=["patch"], url_path="verification")
+    def verification(self, request, pk=None):
+        user = self.get_object()
+        serializer = AdminToggleVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user.is_verified = serializer.validated_data["is_verified"]
+        user.save(update_fields=["is_verified"])
+
+        msg = (
+            f"User {user.codename} has been marked as verified."
+            if user.is_verified
+            else f"Verification removed for user {user.codename}."
+        )
+        return Response({"message": msg}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Admin - Users"],
+        summary="Admin - Update a user's profile fields",
         description=(
             "Update editable User model fields for any user: "
             "`first_name`, `last_name`, `profile_picture`. "

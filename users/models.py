@@ -287,6 +287,11 @@ class User(AbstractUser):
             "disables standard connection requests to/from them."
         ),
     )
+    is_verified = models.BooleanField(
+        default=False,
+        verbose_name=_("Verified"),
+        help_text="True when an admin has manually verified the user.",
+    )
 
     # ── Online presence ───────────────────────────────────────────────────────
     last_active = models.DateTimeField(

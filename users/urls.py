@@ -32,6 +32,7 @@ Full endpoint map:
     GET  /api/user/admin/users/                 AdminUserViewSet (list)
     GET  /api/user/admin/users/{id}/            AdminUserViewSet (retrieve)
     PATCH /api/user/admin/users/{id}/block/     AdminUserViewSet.block
+    PATCH /api/user/admin/users/{id}/verification/ AdminUserViewSet.verification
 
     ── Admin — matchmaker management (superadmin only) ──────────────
     GET  /api/user/admin/matchmakers/                       MatchmakerViewSet (list)

@@ -732,6 +732,7 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             "role",
             "gender",
             "subscription_plan",
+            "is_verified",
             "is_active",
             "deactivated_by_user",
             "is_private_matchmaking_client",
@@ -760,6 +761,11 @@ class AdminBlockUserSerializer(serializers.Serializer):
     """Payload for admin blocking/unblocking a user."""
     is_active = serializers.BooleanField()
     reason    = serializers.CharField(required=False, allow_blank=True)
+
+
+class AdminToggleVerificationSerializer(serializers.Serializer):
+    """Payload for admin verifying/unverifying a user."""
+    is_verified = serializers.BooleanField()
 
 
 class DeactivateAccountSerializer(serializers.Serializer):
