@@ -1373,7 +1373,7 @@ class MatchmakerViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsSuperAdmin]
     serializer_class   = MatchmakerDetailSerializer
     parser_classes     = [MultiPartParser, FormParser, JSONParser]
-    filterset_fields   = ["role"]
+    filterset_fields   = ["role", "is_active"]
     search_fields      = ["first_name", "last_name", "email"]
 
     def get_queryset(self):
