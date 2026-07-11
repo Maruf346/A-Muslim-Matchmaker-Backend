@@ -127,6 +127,7 @@ class AdminUserFilterSet(filters.FilterSet):
         choices=SubscriptionPlan.choices,
     )
     is_active = filters.BooleanFilter(field_name="is_active")
+    is_verified = filters.BooleanFilter(field_name="is_verified")
     date_of_birth = filters.DateFilter(method="filter_date_of_birth")
     age = filters.NumberFilter(method="filter_age")
     sect = filters.CharFilter(method="filter_basic_info_choice")
@@ -173,6 +174,7 @@ class AdminUserFilterSet(filters.FilterSet):
             "gender",
             "subscription_plan",
             "is_active",
+            "is_verified",
             "date_of_birth",
             "age",
             "sect",
