@@ -6,7 +6,7 @@
 #    - No SQLite volume — uses AWS RDS PostgreSQL
 #    - No media volume — media served from AWS S3
 #    - Celery uses prefork pool (not solo) for better throughput on Linux
-#    - Nginx listens on port 80 (Elastic IP / ALB in front)
+#    - Nginx listens on port 80/443 (Elastic IP / ALB in front)
 #    - All secrets come from .env.production (NOT committed to git)
 #
 #  Usage on EC2:
@@ -43,9 +43,11 @@ services:
     container_name: amm_nginx
     ports:
       - "80:80"        # HTTP
+      - "443:443"      # HTTPS
     volumes:
       - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - static_data:/app/staticfiles:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       django:
         condition: service_healthy

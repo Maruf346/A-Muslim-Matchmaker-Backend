@@ -524,9 +524,8 @@ Ensure `EC2_SSH_KEY` is in OpenSSH format (starts with `-----BEGIN OPENSSH PRIVA
 2. Install Certbot: `sudo apt-get install -y certbot`
 3. Stop Nginx: `docker compose -f docker-compose.prod.yml --env-file .env.production stop nginx`
 4. Get certificate: `sudo certbot certonly --standalone -d yourdomain.com -d www.yourdomain.com`
-5. Uncomment the HTTPS block in `nginx.prod.conf`
-6. Mount `/etc/letsencrypt` in Nginx service in `docker-compose.prod.yml`
-7. Restart: `docker compose -f docker-compose.prod.yml --env-file .env.production up -d`
+5. Start the stack again: `docker compose -f docker-compose.prod.yml --env-file .env.production up -d`
+6. Test renewal: `sudo certbot renew --dry-run`
 
 ---
 
