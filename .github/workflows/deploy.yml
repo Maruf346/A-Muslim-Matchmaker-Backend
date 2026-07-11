@@ -59,14 +59,8 @@ jobs:
             echo "→ Pulling latest code from main..."
             git pull origin main
 
-            echo "→ Stopping existing containers..."
-            docker compose -f docker-compose.prod.yml --env-file .env.production down --remove-orphans
-
-            echo "→ Building updated images..."
-            docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache
-
-            echo "→ Starting containers..."
-            docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+            echo "→ Recreating containers with cached build layers..."
+            docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build --remove-orphans
 
             echo "→ Waiting for Django to become healthy..."
             for i in $(seq 1 24); do
