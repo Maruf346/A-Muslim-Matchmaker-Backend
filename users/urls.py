@@ -33,6 +33,7 @@ Full endpoint map:
     GET  /api/user/admin/users/{id}/            AdminUserViewSet (retrieve)
     PATCH /api/user/admin/users/{id}/block/     AdminUserViewSet.block
     PATCH /api/user/admin/users/{id}/verification/ AdminUserViewSet.verification
+    DELETE /api/user/admin/users/{id}/delete/   AdminUserViewSet.delete_user
 
     ── Admin — matchmaker management (superadmin only) ──────────────
     GET  /api/user/admin/matchmakers/                       MatchmakerViewSet (list)
@@ -56,6 +57,7 @@ Full endpoint map:
     ── User profile (male / female / wali) ──────────────────────────
     GET  /api/user/profile/                     UserProfileView
     PATCH /api/user/profile/                    UserProfileView
+    DELETE /api/user/profile/                   UserProfileView
     PATCH /api/user/profile/picture/            UpdateProfilePictureView
     POST /api/user/profile/deactivate/          DeactivateAccountView
 """

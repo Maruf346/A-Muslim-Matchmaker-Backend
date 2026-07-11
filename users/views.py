@@ -1060,6 +1060,18 @@ class UserProfileView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(
+        summary="Delete my profile",
+        description=(
+            "Permanently deletes the authenticated user's own profile and account. "
+            "This action is irreversible."
+        ),
+        responses={204: OpenApiResponse(description="Profile deleted.")},
+    )
+    def delete(self, request):
+        request.user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 @extend_schema(tags=["Profile - User"])
 class UpdateProfilePictureView(APIView):
@@ -1349,6 +1361,29 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
             AdminUserListSerializer(user, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        tags=["Admin - Users"],
+        summary="Admin - Delete a user",
+        description=(
+            "Permanently deletes any user account. "
+            "Use the profile endpoint to delete your own account."
+        ),
+        responses={
+            204: OpenApiResponse(description="User deleted."),
+            403: OpenApiResponse(description="Cannot delete your own account here."),
+        },
+    )
+    @action(detail=True, methods=["delete"], url_path="delete")
+    def delete_user(self, request, pk=None):
+        user = self.get_object()
+        if user.id == request.user.id:
+            return Response(
+                {"error": "Use the profile endpoint to delete your own account."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
