@@ -39,7 +39,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from notifications.services import NotificationTemplates
 
-from .models import SubscriptionPlan, UserRole
+from .models import *
 from .permissions import IsAdminUser, IsNormalUser, IsSuperAdmin
 from .serializers import *
 from .services import *
@@ -1137,6 +1137,37 @@ class DeactivateAccountView(APIView):
         )
 
 
+@extend_schema(tags=["Profile - User"])
+class WhyLeavingView(APIView):
+    """
+    POST — Capture why a user is leaving the platform.
+    Available to: Male, Female, Wali.
+    """
+    permission_classes = [IsNormalUser]
+
+    @extend_schema(
+        summary="Submit why I am leaving",
+        description=(
+            "Stores a comma-separated list of reasons and an optional free-form "
+            "comment. This endpoint is intended for users before they delete or "
+            "deactivate their account."
+        ),
+        request=WhyLeavingUserSerializer,
+        responses={
+            201: WhyLeavingAdminSerializer,
+            400: OpenApiResponse(description="Validation error."),
+        },
+    )
+    def post(self, request):
+        serializer = WhyLeavingUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        leaving = serializer.save()
+        return Response(
+            WhyLeavingAdminSerializer(leaving, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ADMIN PROFILE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1384,6 +1415,45 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
             )
         user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(tags=["Admin - Why Leaving"])
+@extend_schema_view(
+    list=extend_schema(
+        summary="Admin — List why-leaving records",
+        responses={200: WhyLeavingAdminSerializer(many=True)},
+    ),
+    retrieve=extend_schema(
+        summary="Admin — Get why-leaving detail",
+        responses={200: WhyLeavingAdminSerializer},
+    ),
+    create=extend_schema(
+        summary="Admin — Create why-leaving record",
+        request=WhyLeavingAdminSerializer,
+        responses={201: WhyLeavingAdminSerializer},
+    ),
+    update=extend_schema(
+        summary="Admin — Update why-leaving record",
+        request=WhyLeavingAdminSerializer,
+        responses={200: WhyLeavingAdminSerializer},
+    ),
+    partial_update=extend_schema(
+        summary="Admin — Partially update why-leaving record",
+        request=WhyLeavingAdminSerializer,
+        responses={200: WhyLeavingAdminSerializer},
+    ),
+    destroy=extend_schema(
+        summary="Admin — Delete why-leaving record",
+        responses={204: OpenApiResponse(description="Record deleted.")},
+    ),
+)
+class WhyLeavingViewSet(viewsets.ModelViewSet):
+    """
+    Admin full CRUD for why-leaving records.
+    """
+    permission_classes = [IsAdminUser]
+    serializer_class = WhyLeavingAdminSerializer
+    queryset = WhyLeaving.objects.all().order_by("-id")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

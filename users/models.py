@@ -4,6 +4,7 @@ users/models.py
 Models:
     User          — custom AbstractUser (email-based auth, role-based access)
     UserSettings  — per-user preferences (notifications toggle etc.)
+    WhyLeaving    — account deletion feedback captured from users/admins
 
 Role matrix:
     MALE        → normal user, gender=MALE
@@ -415,3 +416,35 @@ class UserSettings(models.Model):
     class Meta:
         verbose_name        = "User Settings"
         verbose_name_plural = "User Settings"
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Why Leaving
+# ───────────────────────────────────────────────────────────────────────────────
+
+class WhyLeaving(models.Model):
+    """
+    Stores the reason payload a user submits when leaving the platform.
+
+    The reasons field is intentionally a comma-separated string so the frontend
+    can submit multiple reasons in one field without needing a separate join table.
+    """
+
+    reasons = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Comma-separated reasons for leaving the platform.",
+    )
+    tell_us_more = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Optional free-form feedback from the user.",
+    )
+
+    def __str__(self):
+        return self.reasons or f"WhyLeaving #{self.pk}"
+
+    class Meta:
+        verbose_name = "Why Leaving"
+        verbose_name_plural = "Why Leaving"
+        ordering = ["-id"]

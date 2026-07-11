@@ -35,6 +35,14 @@ Full endpoint map:
     PATCH /api/user/admin/users/{id}/verification/ AdminUserViewSet.verification
     DELETE /api/user/admin/users/{id}/delete/   AdminUserViewSet.delete_user
 
+    ── Admin — why leaving ───────────────────────────────────────
+    GET  /api/user/admin/why-leavings/          WhyLeavingViewSet (list)
+    GET  /api/user/admin/why-leavings/{id}/     WhyLeavingViewSet (retrieve)
+    POST /api/user/admin/why-leavings/          WhyLeavingViewSet (create)
+    PATCH /api/user/admin/why-leavings/{id}/    WhyLeavingViewSet (partial update)
+    PUT  /api/user/admin/why-leavings/{id}/     WhyLeavingViewSet (update)
+    DELETE /api/user/admin/why-leavings/{id}/   WhyLeavingViewSet (destroy)
+
     ── Admin — matchmaker management (superadmin only) ──────────────
     GET  /api/user/admin/matchmakers/                       MatchmakerViewSet (list)
     GET  /api/user/admin/matchmakers/{id}/                  MatchmakerViewSet (retrieve)
@@ -70,6 +78,7 @@ from .views import *
 # ViewSet routers
 router = DefaultRouter()
 router.register(r"admin/users",        AdminUserViewSet,   basename="admin-users")
+router.register(r"admin/why-leavings", WhyLeavingViewSet, basename="admin-why-leavings")
 router.register(r"admin/matchmakers",  MatchmakerViewSet,  basename="admin-matchmakers")
 
 urlpatterns = [
@@ -110,6 +119,7 @@ urlpatterns = [
     path("profile/",          UserProfileView.as_view(),         name="user-profile"),
     path("profile/picture/",  UpdateProfilePictureView.as_view(),name="user-profile-picture"),
     path("profile/deactivate/",DeactivateAccountView.as_view(), name="user-deactivate"),
+    path("why-leaving/",      WhyLeavingView.as_view(),         name="why-leaving"),
 
     # ── ViewSet routes (admin/users, admin/matchmakers) ───────────────────────
     path("", include(router.urls)),

@@ -830,3 +830,35 @@ class DeactivateAccountSerializer(serializers.Serializer):
         if not self.context["request"].user.check_password(value):
             raise serializers.ValidationError("Incorrect password.")
         return value
+
+
+class WhyLeavingUserSerializer(serializers.ModelSerializer):
+    """
+    User-facing serializer for submitting why they are leaving.
+    Used only for POST requests.
+    """
+
+    class Meta:
+        model = WhyLeaving
+        fields = ["reasons", "tell_us_more"]
+        extra_kwargs = {
+            "reasons": {
+                "required": False,
+                "allow_blank": True,
+                "allow_null": True,
+            },
+            "tell_us_more": {
+                "required": False,
+                "allow_blank": True,
+                "allow_null": True,
+            },
+        }
+
+
+class WhyLeavingAdminSerializer(serializers.ModelSerializer):
+    """Full CRUD serializer for admin management of why-leaving records."""
+
+    class Meta:
+        model = WhyLeaving
+        fields = ["id", "reasons", "tell_us_more"]
+        read_only_fields = ["id"]
