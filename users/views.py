@@ -1374,6 +1374,7 @@ class MatchmakerViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class   = MatchmakerDetailSerializer
     parser_classes     = [MultiPartParser, FormParser, JSONParser]
     filterset_fields   = ["role"]
+    search_fields      = ["first_name", "last_name", "email"]
 
     def get_queryset(self):
         return User.objects.filter(
