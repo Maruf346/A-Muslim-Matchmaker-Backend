@@ -11,6 +11,7 @@ Organized by concern:
 """
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 
 from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
 from questions.serializers import UserPhotoSerializer
@@ -76,6 +77,16 @@ def _get_primary_photo_url(user, request) -> str | None:
     if request:
         return request.build_absolute_uri(photo.image.url)
     return photo.image.url
+
+
+class AdminMatchProfileSerializer(serializers.Serializer):
+    """Compact admin-facing summary for a match participant."""
+    id = serializers.UUIDField()
+    codename = serializers.CharField()
+    full_name = serializers.CharField()
+    gender = serializers.CharField(allow_null=True, required=False)
+    phone = serializers.CharField(allow_null=True, required=False)
+    profile_picture = serializers.CharField(allow_null=True, required=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -397,6 +408,10 @@ class AdminMatchListSerializer(serializers.ModelSerializer):
     groom  = serializers.SerializerMethodField()
     bride  = serializers.SerializerMethodField()
     photos_revealed = serializers.SerializerMethodField()
+    total_matches = serializers.SerializerMethodField()
+    in_discussion_count = serializers.SerializerMethodField()
+    married_count = serializers.SerializerMethodField()
+    dropped_count = serializers.SerializerMethodField()
 
     class Meta:
         model  = Match
@@ -404,6 +419,7 @@ class AdminMatchListSerializer(serializers.ModelSerializer):
             "id", "match_id", "status",
             "groom", "bride",
             "photos_revealed", "photos_revealed_count",
+            "total_matches", "in_discussion_count", "married_count", "dropped_count",
             "wali_request_status",
             "requested_at", "accepted_at", "married_at", "dropped_at",
             "created_at",
@@ -422,14 +438,31 @@ class AdminMatchListSerializer(serializers.ModelSerializer):
             "profile_picture": _get_primary_photo_url(user, request),
         }
 
+    @extend_schema_field(AdminMatchProfileSerializer)
     def get_groom(self, obj) -> dict:
         return self._profile_summary(obj.male_user)
 
+    @extend_schema_field(AdminMatchProfileSerializer)
     def get_bride(self, obj) -> dict:
         return self._profile_summary(obj.other_user)
 
     def get_photos_revealed(self, obj) -> bool:
         return obj.photos_revealed_count > 0
+
+    def _counters(self) -> dict:
+        return self.context.get("match_counters", {})
+
+    def get_total_matches(self, obj) -> int:
+        return self._counters().get("total_matches", 0)
+
+    def get_in_discussion_count(self, obj) -> int:
+        return self._counters().get("in_discussion_count", 0)
+
+    def get_married_count(self, obj) -> int:
+        return self._counters().get("married_count", 0)
+
+    def get_dropped_count(self, obj) -> int:
+        return self._counters().get("dropped_count", 0)
 
 
 class AdminMatchDetailSerializer(AdminMatchListSerializer):

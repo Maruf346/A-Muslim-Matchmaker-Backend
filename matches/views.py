@@ -918,7 +918,7 @@ class ConnectionUsageView(APIView):
         summary="Admin — List all matches",
         description=(
             "Returns all matches across the platform with Groom/Bride summary, "
-            "status, and photo reveal info. Filterable by `status`."
+            "status, and photo reveal info. Filterable by `status` and created date range."
         ),
         parameters=[
             OpenApiParameter(
@@ -927,6 +927,16 @@ class ConnectionUsageView(APIView):
                     "Filter by status: pending, declined, accepted, cancelled, "
                     "wali_requested, wali_accepted, in_discussion, married, dropped."
                 ),
+            ),
+            OpenApiParameter(
+                "start_date",
+                str,
+                description="Filter matches created on or after this date (`YYYY-MM-DD`).",
+            ),
+            OpenApiParameter(
+                "end_date",
+                str,
+                description="Filter matches created on or before this date (`YYYY-MM-DD`).",
             ),
         ],
         responses={200: AdminMatchListSerializer(many=True)},
@@ -952,12 +962,34 @@ class AdminMatchViewSet(viewsets.ReadOnlyModelViewSet):
         status_filter = self.request.query_params.get("status")
         if status_filter:
             qs = qs.filter(status=status_filter)
+
+        start_date = self.request.query_params.get("start_date")
+        end_date = self.request.query_params.get("end_date")
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
         return qs
 
     def get_serializer_class(self):
         if self.action == "retrieve":
             return AdminMatchDetailSerializer
         return AdminMatchListSerializer
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        counters = {
+            "total_matches": queryset.count(),
+            "in_discussion_count": queryset.filter(status=MatchStatus.IN_DISCUSSION).count(),
+            "married_count": queryset.filter(status=MatchStatus.MARRIED).count(),
+            "dropped_count": queryset.filter(status=MatchStatus.DROPPED).count(),
+        }
+        serializer = self.get_serializer(
+            queryset,
+            many=True,
+            context={**self.get_serializer_context(), "match_counters": counters},
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Matches - Admin"],
