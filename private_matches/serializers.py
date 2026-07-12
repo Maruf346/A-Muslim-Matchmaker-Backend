@@ -3,6 +3,7 @@ private_matches/serializers.py
 """
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from questions.models import FemaleBasicInfo, MaleBasicInfo, WaliBasicInfo
 from users.models import UserRole
 from .models import PrivateMatchSuggestion, SuggestionStatus
@@ -36,6 +37,25 @@ def _user_card(user, request) -> dict:
     }
 
 
+class PrivateMatchUserCardSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    codename = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    role = serializers.CharField()
+    gender = serializers.CharField(allow_null=True)
+    profile_picture = serializers.CharField(allow_null=True)
+    city = serializers.CharField(allow_null=True)
+    country = serializers.CharField(allow_null=True)
+    sect = serializers.CharField(allow_null=True)
+    age = serializers.IntegerField(allow_null=True)
+
+
+class ReviewedBySerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    codename = serializers.CharField()
+
+
 # ── Client-side (private client sees their suggestions) ───────────────────────
 
 class ClientSuggestionSerializer(serializers.ModelSerializer):
@@ -54,6 +74,7 @@ class ClientSuggestionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    @extend_schema_field(PrivateMatchUserCardSerializer)
     def get_prospect(self, obj) -> dict:
         return _user_card(obj.prospect, self.context.get("request"))
 
@@ -75,6 +96,7 @@ class ProspectSpecialMatchSerializer(serializers.ModelSerializer):
         fields = ["id", "private_client", "status", "created_at"]
         read_only_fields = fields
 
+    @extend_schema_field(PrivateMatchUserCardSerializer)
     def get_private_client(self, obj) -> dict:
         return _user_card(obj.private_client, self.context.get("request"))
 
@@ -114,9 +136,11 @@ class AdminSuggestionListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    @extend_schema_field(PrivateMatchUserCardSerializer)
     def get_private_client(self, obj) -> dict:
         return _user_card(obj.private_client, self.context.get("request"))
 
+    @extend_schema_field(PrivateMatchUserCardSerializer)
     def get_prospect(self, obj) -> dict:
         return _user_card(obj.prospect, self.context.get("request"))
 

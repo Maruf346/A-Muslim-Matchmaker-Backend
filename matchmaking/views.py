@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from users.permissions import IsAdminUser, IsNormalUser
+from users.serializers import AdminUserListSerializer
 from .models import PrivateMatchmakingRequest, RequestStatus
 from .serializers import *
 from .services import MatchmakingRequestService
@@ -86,9 +87,11 @@ class MyMatchmakingRequestView(APIView):
 @extend_schema_view(
     list=extend_schema(
         summary="Admin — List all private matchmaking requests",
-        description="Filterable by `status`. Searchable by codename, email.",
+        description="Filterable by `status` and created date range. Searchable by codename, email.",
         parameters=[
             OpenApiParameter("status", str, description="pending / approved / declined"),
+            OpenApiParameter("start_date", str, description="Filter requests created on or after this date (`YYYY-MM-DD`)."),
+            OpenApiParameter("end_date", str, description="Filter requests created on or before this date (`YYYY-MM-DD`)."),
             OpenApiParameter("search", str, description="Search by codename or email."),
         ],
         responses={200: AdminRequestListSerializer(many=True)},
@@ -109,12 +112,32 @@ class AdminMatchmakingRequestViewSet(viewsets.ReadOnlyModelViewSet):
         s  = self.request.query_params.get("status")
         if s:
             qs = qs.filter(status=s)
+        start_date = self.request.query_params.get("start_date")
+        end_date = self.request.query_params.get("end_date")
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
         return qs
 
     def get_serializer_class(self):
         if self.action == "retrieve":
             return AdminRequestDetailSerializer
         return AdminRequestListSerializer
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        counters = {
+            "pending_count": queryset.filter(status=RequestStatus.PENDING).count(),
+            "approved_count": queryset.filter(status=RequestStatus.APPROVED).count(),
+            "declined_count": queryset.filter(status=RequestStatus.DECLINED).count(),
+        }
+        serializer = self.get_serializer(
+            queryset,
+            many=True,
+            context={**self.get_serializer_context(), "request_counters": counters},
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["Matchmaking - Admin"],
@@ -172,11 +195,10 @@ class AdminPrivateClientListView(APIView):
             OpenApiParameter("gender", str, description="`male` or `female` (female includes wali)."),
             OpenApiParameter("search", str, description="Search by codename, name, or email."),
         ],
-        responses={200: OpenApiResponse(description="List of private clients.")},
+        responses={200: AdminUserListSerializer(many=True)},
     )
     def get(self, request):
         from users.models import UserRole
-        from users.serializers import AdminUserListSerializer
 
         qs = User.objects.filter(is_private_matchmaking_client=True, is_active=True)
 
@@ -196,7 +218,6 @@ class AdminPrivateClientListView(APIView):
                 | Q(email__icontains=search)
             )
 
-        from users.serializers import AdminUserListSerializer
         return Response(
             AdminUserListSerializer(qs, many=True, context={"request": request}).data,
             status=status.HTTP_200_OK,
