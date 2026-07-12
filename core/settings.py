@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'chat',
     'matchmaking',
     'private_matches',
+    'dashboard',
 ]
 
 MIDDLEWARE = [

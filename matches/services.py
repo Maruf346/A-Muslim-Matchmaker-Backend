@@ -184,6 +184,8 @@ class MatchService:
         if not match.match_id:
             match.match_id = generate_match_id()
         match.save(update_fields=["status", "responded_at", "accepted_at", "match_id", "updated_at"])
+        from dashboard.services import RecentActivityService
+        RecentActivityService.match_created(match)
 
         try:
             NotificationTemplates.connection_request_accepted(
@@ -581,6 +583,8 @@ class MatchService:
         if is_admin:
             match.last_status_changed_by_admin = actor
         match.save(update_fields=["status", "married_at", "last_status_changed_by_admin", "updated_at"])
+        from dashboard.services import RecentActivityService
+        RecentActivityService.user_married(match, actor=actor if is_admin else None)
 
         return match
 
@@ -600,6 +604,8 @@ class MatchService:
         match.status = new_status
         match.last_status_changed_by_admin = admin_user
 
+        should_log_married = new_status == MatchStatus.MARRIED and match.status != MatchStatus.MARRIED
+
         if new_status == MatchStatus.MARRIED and not match.married_at:
             match.married_at = now
         if new_status == MatchStatus.DROPPED and not match.dropped_at:
@@ -614,4 +620,7 @@ class MatchService:
             match.in_discussion_at = now
 
         match.save()
+        if should_log_married:
+            from dashboard.services import RecentActivityService
+            RecentActivityService.user_married(match, actor=admin_user)
         return match

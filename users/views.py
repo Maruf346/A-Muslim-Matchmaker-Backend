@@ -1358,9 +1358,14 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
         user = self.get_object()
         serializer = AdminToggleVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        was_verified = user.is_verified
 
         user.is_verified = serializer.validated_data["is_verified"]
         user.save(update_fields=["is_verified"])
+
+        if user.is_verified and not was_verified:
+            from dashboard.services import RecentActivityService
+            RecentActivityService.user_verified(user, admin=request.user)
 
         msg = (
             f"User {user.codename} has been marked as verified."

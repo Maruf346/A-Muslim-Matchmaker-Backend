@@ -220,6 +220,10 @@ class RegistrationService:
             # Clear OTP cache only after the DB work succeeds.
             cache.delete(cache_key)
 
+        if created:
+            from dashboard.services import RecentActivityService
+            RecentActivityService.user_registered(user)
+
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
 

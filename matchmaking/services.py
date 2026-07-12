@@ -29,6 +29,8 @@ class MatchmakingRequestService:
         req = PrivateMatchmakingRequest.objects.create(user=user)
         req.request_id = generate_request_id()
         req.save(update_fields=["request_id"])
+        from dashboard.services import RecentActivityService
+        RecentActivityService.matchmaking_request_created(req)
         return req
 
     @staticmethod
@@ -47,6 +49,8 @@ class MatchmakingRequestService:
         user = request.user
         user.is_private_matchmaking_client = True
         user.save(update_fields=["is_private_matchmaking_client"])
+        from dashboard.services import RecentActivityService
+        RecentActivityService.matchmaking_request_approved(request, admin)
 
         try:
             from notifications.services import NotificationTemplates
@@ -66,6 +70,8 @@ class MatchmakingRequestService:
         request.reviewed_at = timezone.now()
         request.admin_notes = notes or ""
         request.save(update_fields=["status", "reviewed_by", "reviewed_at", "admin_notes", "updated_at"])
+        from dashboard.services import RecentActivityService
+        RecentActivityService.matchmaking_request_declined(request, admin)
 
         try:
             from notifications.services import NotificationTemplates

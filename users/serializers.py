@@ -366,6 +366,8 @@ class _BaseOAuthSerializer(serializers.Serializer):
         user.codename = self._assign_codename(user)
         user.save(update_fields=["codename"])
         UserSettings.objects.create(user=user)
+        from dashboard.services import RecentActivityService
+        RecentActivityService.user_registered(user)
         return user, True
 
     @staticmethod
