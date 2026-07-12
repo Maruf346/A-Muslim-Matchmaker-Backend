@@ -918,7 +918,8 @@ class ConnectionUsageView(APIView):
         summary="Admin — List all matches",
         description=(
             "Returns all matches across the platform with Groom/Bride summary, "
-            "status, and photo reveal info. Filterable by `status` and created date range."
+            "status, and photo reveal info. Filterable by `status`, recent matches, "
+            "`photos_revealed`, and created date range."
         ),
         parameters=[
             OpenApiParameter(
@@ -937,6 +938,16 @@ class ConnectionUsageView(APIView):
                 "end_date",
                 str,
                 description="Filter matches created on or before this date (`YYYY-MM-DD`).",
+            ),
+            OpenApiParameter(
+                "recent",
+                bool,
+                description="If true, return matches created in the last 7 days.",
+            ),
+            OpenApiParameter(
+                "photos_revealed",
+                bool,
+                description="If true, return only matches with at least one photo reveal.",
             ),
             OpenApiParameter(
                 "search",
@@ -979,6 +990,9 @@ class AdminMatchViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields   = ["status"]
 
     def get_queryset(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
         qs = Match.objects.all()
         status_filter = self.request.query_params.get("status")
         if status_filter:
@@ -990,6 +1004,16 @@ class AdminMatchViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(created_at__date__gte=start_date)
         if end_date:
             qs = qs.filter(created_at__date__lte=end_date)
+
+        if self.request.query_params.get("recent") == "true":
+            cutoff = timezone.now() - timedelta(days=7)
+            qs = qs.filter(created_at__gte=cutoff)
+
+        photos_revealed = self.request.query_params.get("photos_revealed")
+        if photos_revealed == "true":
+            qs = qs.filter(photos_revealed_count__gt=0)
+        elif photos_revealed == "false":
+            qs = qs.filter(photos_revealed_count=0)
         return qs
 
     def get_serializer_class(self):
