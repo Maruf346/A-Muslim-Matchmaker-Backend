@@ -938,6 +938,14 @@ class ConnectionUsageView(APIView):
                 str,
                 description="Filter matches created on or before this date (`YYYY-MM-DD`).",
             ),
+            OpenApiParameter(
+                "search",
+                str,
+                description=(
+                    "Search by match ID, status, groom/bride first name, last name, "
+                    "email, or codename."
+                ),
+            ),
         ],
         responses={200: AdminMatchListSerializer(many=True)},
     ),
@@ -952,7 +960,20 @@ class AdminMatchViewSet(viewsets.ReadOnlyModelViewSet):
     Available to: Matchmaker, Superadmin.
     """
     permission_classes = [IsAdminUser]
-    filter_backends    = [OrderingFilter]
+    filter_backends    = [SearchFilter, OrderingFilter]
+    search_fields      = [
+        "match_id",
+        "status",
+        "male_user__first_name",
+        "male_user__last_name",
+        "male_user__email",
+        "male_user__codename",
+        "other_user__first_name",
+        "other_user__last_name",
+        "other_user__email",
+        "other_user__codename",
+        "created_at",
+    ]
     ordering_fields    = ["created_at", "updated_at", "accepted_at", "married_at"]
     ordering           = ["-created_at"]
     filterset_fields   = ["status"]
