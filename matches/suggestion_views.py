@@ -14,8 +14,8 @@ Subscription gate: Monthly + Annual only (Free → 403)
 import logging
 
 from django.contrib.auth import get_user_model
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
-from rest_framework import status
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, inline_serializer
+from rest_framework import serializers as drf_serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -85,6 +85,43 @@ def _last_active_display(user) -> str | None:
     return f"Active {seconds // 86400} day(s) ago"
 
 
+SuggestionCardSchema = inline_serializer(
+    name="SuggestionCard",
+    fields={
+        "id":                    drf_serializers.UUIDField(),
+        "codename":              drf_serializers.CharField(),
+        "role":                  drf_serializers.CharField(),
+        "gender":                drf_serializers.CharField(allow_null=True),
+        "subscription_plan":     drf_serializers.CharField(),
+        "last_active":           drf_serializers.DateTimeField(allow_null=True),
+        "last_active_display":   drf_serializers.CharField(allow_null=True),
+        "match_score":           drf_serializers.IntegerField(),
+        "age":                   drf_serializers.IntegerField(allow_null=True),
+        "city":                  drf_serializers.CharField(allow_null=True),
+        "country":               drf_serializers.CharField(allow_null=True),
+        "sect":                  drf_serializers.CharField(allow_null=True),
+        "marital_status":        drf_serializers.CharField(allow_null=True),
+        "height":                drf_serializers.CharField(allow_null=True),
+        "frame":                 drf_serializers.CharField(allow_null=True),
+        "ethnicity":             drf_serializers.ListField(child=drf_serializers.CharField()),
+        "languages_spoken":      drf_serializers.ListField(child=drf_serializers.CharField()),
+        "photo_blurred":         drf_serializers.BooleanField(),
+        "profile_picture":       drf_serializers.CharField(allow_null=True),
+        "completion_percentage": drf_serializers.IntegerField(),
+    },
+)
+
+_upgrade_error = inline_serializer(
+    name="SubscriptionRequiredError",
+    fields={"error": drf_serializers.CharField()},
+)
+
+_no_prefs_error = inline_serializer(
+    name="NoPreferencesError",
+    fields={"error": drf_serializers.CharField()},
+)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Views
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,9 +166,9 @@ class SuggestedMatchesListView(APIView):
             ),
         ],
         responses={
-            200: OpenApiResponse(description="List of suggested profile cards with match_score."),
-            403: OpenApiResponse(description="Free plan — upgrade required."),
-            400: OpenApiResponse(description="No preferences set — complete your profile first."),
+            200: SuggestionCardSchema.__class__(many=True),
+            403: _upgrade_error,
+            400: _no_prefs_error,
         },
     )
     def get(self, request):
@@ -205,9 +242,12 @@ class SuggestedMatchDetailView(APIView):
             ),
         ],
         responses={
-            200: OpenApiResponse(description="Suggested profile card."),
-            403: OpenApiResponse(description="Free plan — upgrade required."),
-            404: OpenApiResponse(description="Profile not found or not a valid suggestion."),
+            200: SuggestionCardSchema,
+            403: _upgrade_error,
+            404: inline_serializer(
+                name="NotFoundError",
+                fields={"error": drf_serializers.CharField()},
+            ),
         },
     )
     def get(self, request, user_id):
