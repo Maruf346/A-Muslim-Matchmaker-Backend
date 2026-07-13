@@ -4,6 +4,10 @@ matches/urls.py
 Registered at: /api/matches/ (add to api/urls.py)
 
 Full endpoint map:
+    ── Suggestions (premium) ────────────────────────────────────────────────
+    GET  /api/matches/suggestions/                        SuggestedMatchesListView
+    GET  /api/matches/suggestions/<user_id>/              SuggestedMatchDetailView
+
     ── Directory ────────────────────────────────────────────────────────────
     GET  /api/matches/directory/                          DirectoryListView
 
@@ -44,11 +48,16 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import *
+from .suggestion_views import SuggestedMatchesListView, SuggestedMatchDetailView
 
 router = DefaultRouter()
 router.register(r"admin/matches", AdminMatchViewSet, basename="admin-matches")
 
 urlpatterns = [
+    # ── Suggestions (premium) ────────────────────────────────────────────────
+    path("suggestions/",                    SuggestedMatchesListView.as_view(),  name="suggestions-list"),
+    path("suggestions/<uuid:user_id>/",     SuggestedMatchDetailView.as_view(),  name="suggestions-detail"),
+
     # ── Directory ────────────────────────────────────────────────────────────
     path("directory/", DirectoryListView.as_view(), name="directory-list"),
     path("directory/<uuid:user_id>/", DirectoryProfileDetailView.as_view(), name="directory-detail"),
