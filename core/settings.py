@@ -440,13 +440,22 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 # ── And the Redis cache section ───────────────────────────────────────────
 _REDIS_HOST = os.environ.get('REDIS_HOST') or 'localhost'
 _REDIS_PORT = os.environ.get('REDIS_PORT') or '6379'
+_REDIS_CACHE_DB = os.environ.get('REDIS_CACHE_DB', '1')
+_REDIS_CHANNEL_DB = os.environ.get('REDIS_CHANNEL_DB', '2')
+_REDIS_SOCKET_TIMEOUT = float(os.environ.get('REDIS_SOCKET_TIMEOUT', '30'))
+_REDIS_SOCKET_CONNECT_TIMEOUT = float(os.environ.get('REDIS_SOCKET_CONNECT_TIMEOUT', '30'))
+_REDIS_HEALTH_CHECK_INTERVAL = int(os.environ.get('REDIS_HEALTH_CHECK_INTERVAL', '30'))
 
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': f'redis://{_REDIS_HOST}:{_REDIS_PORT}/1',
+        'LOCATION': f'redis://{_REDIS_HOST}:{_REDIS_PORT}/{_REDIS_CACHE_DB}',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_TIMEOUT': _REDIS_SOCKET_TIMEOUT,
+            'SOCKET_CONNECT_TIMEOUT': _REDIS_SOCKET_CONNECT_TIMEOUT,
+            'RETRY_ON_TIMEOUT': True,
+            'HEALTH_CHECK_INTERVAL': _REDIS_HEALTH_CHECK_INTERVAL,
         },
         'KEY_PREFIX': 'amm',   # Adds a prefix to every cache key.
         'TIMEOUT': 300,  # Default cache expiry time = 300s (5 mins).
@@ -457,7 +466,18 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [(_REDIS_HOST, int(_REDIS_PORT))],
+            "hosts": [
+                {
+                    "address": f"redis://{_REDIS_HOST}:{_REDIS_PORT}/{_REDIS_CHANNEL_DB}",
+                    "socket_timeout": _REDIS_SOCKET_TIMEOUT,
+                    "socket_connect_timeout": _REDIS_SOCKET_CONNECT_TIMEOUT,
+                    "retry_on_timeout": True,
+                    "health_check_interval": _REDIS_HEALTH_CHECK_INTERVAL,
+                }
+            ],
+            "capacity": 1500,
+            "expiry": 60,
+            "group_expiry": 86400,
         },
     },
 }
