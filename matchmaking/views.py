@@ -14,12 +14,29 @@ from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 from rest_framework.views import APIView
+"""
+matchmaking/views.py
+
+Swagger tags:
+    Matchmaking - User   — submit request, view own request status
+    Matchmaking - Admin  — list/detail/approve/decline requests, list private clients
+"""
+
+import logging
+from django.contrib.auth import get_user_model
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from users.permissions import IsAdminUser, IsNormalUser
 from users.serializers import AdminUserListSerializer
 from .models import PrivateMatchmakingRequest, RequestStatus
 from .serializers import *
 from .services import MatchmakingRequestService
+from core.pagination import FlexiblePageNumberPagination
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -132,6 +149,16 @@ class AdminMatchmakingRequestViewSet(viewsets.ReadOnlyModelViewSet):
             "approved_count": queryset.filter(status=RequestStatus.APPROVED).count(),
             "declined_count": queryset.filter(status=RequestStatus.DECLINED).count(),
         }
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(
+                page,
+                many=True,
+                context={**self.get_serializer_context(), "request_counters": counters},
+            )
+            return self.get_paginated_response(serializer.data)
+
         serializer = self.get_serializer(
             queryset,
             many=True,
@@ -183,6 +210,7 @@ class AdminPrivateClientListView(APIView):
     Available to: Matchmaker, Superadmin.
     """
     permission_classes = [IsAdminUser]
+    pagination_class   = FlexiblePageNumberPagination
 
     @extend_schema(
         summary="Admin — List private matchmaking clients",
@@ -194,13 +222,15 @@ class AdminPrivateClientListView(APIView):
         parameters=[
             OpenApiParameter("gender", str, description="`male` or `female` (female includes wali)."),
             OpenApiParameter("search", str, description="Search by codename, name, or email."),
+            OpenApiParameter("page", int, description="Page number."),
+            OpenApiParameter("page_size", int, description="Number of results per page."),
         ],
         responses={200: AdminUserListSerializer(many=True)},
     )
     def get(self, request):
         from users.models import UserRole
 
-        qs = User.objects.filter(is_private_matchmaking_client=True, is_active=True)
+        qs = User.objects.filter(is_private_matchmaking_client=True, is_active=True).order_by("id")
 
         gender = request.query_params.get("gender")
         if gender == "male":
@@ -218,8 +248,11 @@ class AdminPrivateClientListView(APIView):
                 | Q(email__icontains=search)
             )
 
-        return Response(
-            AdminUserListSerializer(qs, many=True, context={"request": request}).data,
-            status=status.HTTP_200_OK,
-        )
-        
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+        if page is not None:
+            serializer = AdminUserListSerializer(page, many=True, context={"request": request})
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = AdminUserListSerializer(qs, many=True, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
