@@ -10,11 +10,17 @@ Organized by concern:
     6. Admin — match list/detail, status override
 """
 
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
-from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_field
 
 from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
-from questions.serializers import UserPhotoSerializer
+from questions.serializers import (
+    FemaleBasicInfoSerializer,
+    MaleBasicInfoSerializer,
+    UserPhotoSerializer,
+    WaliBasicInfoSerializer,
+)
 from users.models import UserRole
 
 from .models import *
@@ -42,12 +48,25 @@ def _last_active_display(user) -> str | None:
 
 def _get_basic_info(user):
     """Return the relevant basic info object for a user, or None."""
-    if user.role == UserRole.MALE:
-        return MaleBasicInfo.objects.filter(user=user).first()
-    if user.role == UserRole.FEMALE:
-        return FemaleBasicInfo.objects.filter(user=user).first()
-    if user.role == UserRole.WALI:
-        return WaliBasicInfo.objects.filter(user=user).first()
+    try:
+        if user.role == UserRole.MALE:
+            return getattr(user, "male_basic_info", None) or MaleBasicInfo.objects.filter(user=user).first()
+        if user.role == UserRole.FEMALE:
+            return getattr(user, "female_basic_info", None) or FemaleBasicInfo.objects.filter(user=user).first()
+        if user.role == UserRole.WALI:
+            return getattr(user, "wali_basic_info", None) or WaliBasicInfo.objects.filter(user=user).first()
+    except ObjectDoesNotExist:
+        return None
+    return None
+
+
+def _get_basic_info_serializer(instance, context):
+    if isinstance(instance, MaleBasicInfo):
+        return MaleBasicInfoSerializer(instance, context=context)
+    if isinstance(instance, FemaleBasicInfo):
+        return FemaleBasicInfoSerializer(instance, context=context)
+    if isinstance(instance, WaliBasicInfo):
+        return WaliBasicInfoSerializer(instance, context=context)
     return None
 
 
@@ -153,6 +172,33 @@ class DirectoryProfileSerializer(serializers.Serializer):
     def get_photo_blurred(self, obj) -> bool:
         """Always True in directory view — no mutual interest established."""
         return True
+
+
+class DirectoryProfileDetailSerializer(serializers.Serializer):
+    profile = serializers.SerializerMethodField()
+    basic_info = serializers.SerializerMethodField()
+
+    @extend_schema_field(DirectoryProfileSerializer)
+    def get_profile(self, obj) -> dict:
+        return DirectoryProfileSerializer(obj, context=self.context).data
+
+    @extend_schema_field(
+        PolymorphicProxySerializer(
+            component_name="DirectoryBasicInfo",
+            serializers=[
+                MaleBasicInfoSerializer,
+                FemaleBasicInfoSerializer,
+                WaliBasicInfoSerializer,
+            ],
+            resource_type_field_name=None,
+        )
+    )
+    def get_basic_info(self, obj) -> dict | None:
+        info = _get_basic_info(obj)
+        if not info:
+            return None
+        serializer = _get_basic_info_serializer(info, self.context)
+        return serializer.data if serializer else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

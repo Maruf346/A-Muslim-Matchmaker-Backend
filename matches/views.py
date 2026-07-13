@@ -29,6 +29,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from questions.models import FemaleBasicInfo, MaleBasicInfo, WaliBasicInfo
+from users.filters import AdminUserFilterSet
 from users.models import UserRole
 from users.permissions import IsAdminUser, IsFemaleUser, IsMaleUser, IsNormalUser, IsWaliUser
 from wishlists.services import ProfileViewService, VisibilityService
@@ -40,6 +41,86 @@ from .services import MatchService, SubscriptionLimitService
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+DIRECTORY_BASIC_INFO_RELATIONS = ("male_basic_info", "female_basic_info", "wali_basic_info")
+DIRECTORY_SEARCH_USER_FIELDS = ("codename",)
+DIRECTORY_SEARCH_BASIC_INFO_FIELDS = (
+    "city",
+    "country",
+    "sect",
+    "marital_status",
+    "ethnicity",
+    "nationality",
+    "height",
+    "weight",
+    "pray_5x",
+    "open_to_relocate",
+    "employment",
+    "education",
+    "income",
+    "frame",
+    "languages_spoken",
+    "pref_marital_status",
+    "pref_ethnicity",
+    "pref_country_of_residence",
+    "relationship_with_islam",
+    "role_as_spouse",
+    "about_yourself",
+    "envision_spouse",
+    "envision_marriage",
+    "spouse_religious_status_pref",
+    "open_to_relocate_details",
+    "health_concerns",
+    "other_preferences",
+    "dress",
+    "preferred_dress",
+    "about",
+)
+DIRECTORY_FILTER_PARAMETERS = [
+    OpenApiParameter("online", bool, description="Only show users active in the last 5 minutes."),
+    OpenApiParameter("new", bool, description="Only show users registered in the last 7 days."),
+    OpenApiParameter("search", str, description="Search by codename and searchable basic-info text fields."),
+    OpenApiParameter("ordering", str, description="Order by `last_active`, `-last_active`, `created_at`, or `-created_at`."),
+    OpenApiParameter("date_of_birth", str, description="Filter by exact date of birth (`YYYY-MM-DD`)."),
+    OpenApiParameter("age", int, description="Filter by exact age in years."),
+    OpenApiParameter("min_age", int, description="Minimum age."),
+    OpenApiParameter("max_age", int, description="Maximum age."),
+    OpenApiParameter("how_found", str, description="Filter by how the user found the platform."),
+    OpenApiParameter("sect", str, description="Filter by sect."),
+    OpenApiParameter("city", str, description="Filter by city."),
+    OpenApiParameter("country", str, description="Filter by country."),
+    OpenApiParameter("marital_status", str, description="Filter by marital status."),
+    OpenApiParameter("ethnicity", str, description="Filter by ethnicity."),
+    OpenApiParameter("nationality", str, description="Filter by nationality."),
+    OpenApiParameter("has_children", bool, description="Filter by whether the user has children."),
+    OpenApiParameter("children_count", str, description="Filter by number of children."),
+    OpenApiParameter("height", str, description="Filter by height choice."),
+    OpenApiParameter("weight", str, description="Filter by weight choice."),
+    OpenApiParameter("pray_5x", str, description="Filter by prayer consistency."),
+    OpenApiParameter("open_to_relocate", str, description="Filter by relocation choice."),
+    OpenApiParameter("employment", str, description="Filter by employment."),
+    OpenApiParameter("education", str, description="Filter by education choice."),
+    OpenApiParameter("income", str, description="Filter by income choice."),
+    OpenApiParameter("frame", str, description="Filter by body frame choice."),
+    OpenApiParameter("languages_spoken", str, description="Filter by spoken language."),
+    OpenApiParameter("pref_age_min", int, description="Filter by preferred minimum age."),
+    OpenApiParameter("pref_age_max", int, description="Filter by preferred maximum age."),
+    OpenApiParameter("pref_marital_status", str, description="Filter by preferred marital status."),
+    OpenApiParameter("pref_ethnicity", str, description="Filter by preferred ethnicity."),
+    OpenApiParameter("pref_country_of_residence", str, description="Filter by preferred country of residence."),
+    OpenApiParameter("relationship_with_islam", str, description="Filter by relationship with Islam."),
+    OpenApiParameter("role_as_spouse", str, description="Filter by role as spouse."),
+    OpenApiParameter("about_yourself", str, description="Filter by about yourself."),
+    OpenApiParameter("envision_spouse", str, description="Filter by envision spouse."),
+    OpenApiParameter("envision_marriage", str, description="Filter by envision marriage."),
+    OpenApiParameter("spouse_religious_status_pref", str, description="Filter by spouse religious status preference."),
+    OpenApiParameter("open_to_relocate_details", str, description="Filter by relocation details."),
+    OpenApiParameter("health_concerns", str, description="Filter by health concerns."),
+    OpenApiParameter("other_preferences", str, description="Filter by other preferences."),
+    OpenApiParameter("dress", str, description="Filter by dress choice (Female/Wali profiles)."),
+    OpenApiParameter("preferred_dress", str, description="Filter by preferred dress choice (Male profiles)."),
+    OpenApiParameter("about", str, description="Filter by Wali-managed sister profile summary."),
+]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +147,45 @@ def _get_match_or_404(pk, user):
         )
     except Match.DoesNotExist:
         return None
+
+
+def _shift_years(base_date, years):
+    try:
+        return base_date.replace(year=base_date.year - years)
+    except ValueError:
+        return base_date.replace(month=2, day=28, year=base_date.year - years)
+
+
+def _apply_directory_search(queryset, search_term):
+    if not search_term:
+        return queryset
+
+    query = Q()
+    for field in DIRECTORY_SEARCH_USER_FIELDS:
+        query |= Q(**{f"{field}__icontains": search_term})
+    for relation in DIRECTORY_BASIC_INFO_RELATIONS:
+        for field in DIRECTORY_SEARCH_BASIC_INFO_FIELDS:
+            query |= Q(**{f"{relation}__{field}__icontains": search_term})
+    return queryset.filter(query)
+
+
+def _apply_age_range_filters(queryset, min_age=None, max_age=None):
+    from datetime import timedelta
+    from django.utils import timezone
+
+    if min_age is None and max_age is None:
+        return queryset
+
+    today = timezone.now().date()
+    query = Q()
+    for relation in DIRECTORY_BASIC_INFO_RELATIONS:
+        relation_query = Q()
+        if min_age is not None:
+            relation_query &= Q(**{f"{relation}__date_of_birth__lte": _shift_years(today, min_age)})
+        if max_age is not None:
+            relation_query &= Q(**{f"{relation}__date_of_birth__gte": _shift_years(today, max_age + 1) + timedelta(days=1)})
+        query |= relation_query
+    return queryset.filter(query)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -107,17 +227,7 @@ class DirectoryListView(APIView):
             "- `min_age`, `max_age` — filter by computed age\n\n"
             "Photos are always blurred in directory view (no mutual interest yet)."
         ),
-        parameters=[
-            OpenApiParameter("online",         bool, description="Only show users active in the last 5 minutes."),
-            OpenApiParameter("new",            bool, description="Only show users registered in the last 7 days."),
-            OpenApiParameter("sect",           str,  description="Filter by sect: sunni, salafi."),
-            OpenApiParameter("marital_status", str,  description="Filter by marital status."),
-            OpenApiParameter("city",           str,  description="Filter by city (exact match)."),
-            OpenApiParameter("country",        str,  description="Filter by country (exact match)."),
-            OpenApiParameter("min_age",        int,  description="Minimum age."),
-            OpenApiParameter("max_age",        int,  description="Maximum age."),
-            OpenApiParameter("search",         str,  description="Search by codename."),
-        ],
+        parameters=DIRECTORY_FILTER_PARAMETERS,
         responses={200: DirectoryProfileSerializer(many=True)},
     )
     def get(self, request):
@@ -125,7 +235,12 @@ class DirectoryListView(APIView):
         from datetime import timedelta
 
         roles = _opposite_gender_roles(request.user)
-        qs = User.objects.filter(role__in=roles, is_active=True).exclude(id=request.user.id)
+        qs = User.objects.filter(role__in=roles, is_active=True).exclude(id=request.user.id).select_related(
+            "male_basic_info",
+            "female_basic_info",
+            "wali_basic_info",
+            "wali_profile",
+        )
 
         # ── exclude blocked / hidden / reported profiles ─────────────────────
         excluded_ids = VisibilityService.get_excluded_user_ids(request.user)
@@ -136,18 +251,17 @@ class DirectoryListView(APIView):
         qs = qs.filter(is_private_matchmaking_client=False)
 
         # ── online / new filters ─────────────────────────────────────────────
-        if request.query_params.get("online") == "true":
+        if request.query_params.get("online", "").lower() == "true":
             cutoff = timezone.now() - timedelta(minutes=5)
             qs = qs.filter(last_active__gte=cutoff)
 
-        if request.query_params.get("new") == "true":
+        if request.query_params.get("new", "").lower() == "true":
             cutoff = timezone.now() - timedelta(days=7)
             qs = qs.filter(created_at__gte=cutoff)
 
         # ── search by codename ───────────────────────────────────────────────
-        search = request.query_params.get("search")
-        if search:
-            qs = qs.filter(codename__icontains=search)
+        qs = _apply_directory_search(qs, request.query_params.get("search"))
+        qs = AdminUserFilterSet(data=request.query_params, queryset=qs, request=request).qs
 
         # ── basic-info field filters ─────────────────────────────────────────
         sect           = request.query_params.get("sect")
@@ -191,7 +305,7 @@ class DirectoryListView(APIView):
         if ordering in ("last_active", "-last_active", "created_at", "-created_at"):
             qs = qs.order_by(ordering)
 
-        serializer = DirectoryProfileSerializer(qs, many=True, context={"request": request})
+        serializer = DirectoryProfileSerializer(qs.distinct(), many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -207,20 +321,25 @@ class DirectoryProfileDetailView(APIView):
     @extend_schema(
         summary="View a single directory profile",
         description=(
-            "Returns the directory-style profile card for a specific user and "
-            "records a `ProfileView` entry (used for the 'who viewed me' feature). "
+            "Returns the directory-style profile card plus the target user's "
+            "role-appropriate basic info record, and records a `ProfileView` "
+            "entry (used for the 'who viewed me' feature). "
             "Only opposite-gender profiles are accessible. Blocked/hidden/reported "
             "profiles return 404."
         ),
         responses={
-            200: DirectoryProfileSerializer,
+            200: DirectoryProfileDetailSerializer,
             404: OpenApiResponse(description="Profile not found or not accessible."),
         },
     )
     def get(self, request, user_id):
         roles = _opposite_gender_roles(request.user)
         try:
-            target = User.objects.get(id=user_id, role__in=roles, is_active=True)
+            target = User.objects.select_related(
+                "male_basic_info",
+                "female_basic_info",
+                "wali_basic_info",
+            ).get(id=user_id, role__in=roles, is_active=True)
         except User.DoesNotExist:
             return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -233,7 +352,7 @@ class DirectoryProfileDetailView(APIView):
             logger.exception("Failed to record profile view for user %s", target.id)
 
         return Response(
-            DirectoryProfileSerializer(target, context={"request": request}).data,
+            DirectoryProfileDetailSerializer(target, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
 
