@@ -774,31 +774,34 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             return f"Active {seconds // 3600} hr(s) ago"
         return f"Active {seconds // 86400} day(s) ago"
 
+    def _is_retrieve(self) -> bool:
+        """Returns True if the current request is for a detail (retrieve) view."""
+        view = self.context.get("view")
+        return getattr(view, "action", None) == "retrieve"
+
     def get_first_name(self, obj) -> str | None:
         from users.models import UserRole
-        if obj.role == UserRole.WALI:
+        if obj.role == UserRole.WALI and not self._is_retrieve():
             wali_info = getattr(obj, "wali_basic_info", None)
-            if wali_info:
-                return wali_info.sister_first_name
-            from questions.models import WaliBasicInfo
-            wali_info = WaliBasicInfo.objects.filter(user=obj).first()
+            if wali_info is None:
+                from questions.models import WaliBasicInfo
+                wali_info = WaliBasicInfo.objects.filter(user=obj).first()
             return getattr(wali_info, "sister_first_name", None) or obj.first_name
         return obj.first_name
 
     def get_last_name(self, obj) -> str | None:
         from users.models import UserRole
-        if obj.role == UserRole.WALI:
+        if obj.role == UserRole.WALI and not self._is_retrieve():
             wali_info = getattr(obj, "wali_basic_info", None)
-            if wali_info:
-                return wali_info.sister_last_name
-            from questions.models import WaliBasicInfo
-            wali_info = WaliBasicInfo.objects.filter(user=obj).first()
+            if wali_info is None:
+                from questions.models import WaliBasicInfo
+                wali_info = WaliBasicInfo.objects.filter(user=obj).first()
             return getattr(wali_info, "sister_last_name", None) or obj.last_name
         return obj.last_name
 
     def get_gender(self, obj) -> str | None:
         from users.models import UserRole
-        if obj.role == UserRole.WALI:
+        if obj.role == UserRole.WALI and not self._is_retrieve():
             return "female"
         return obj.gender
 
