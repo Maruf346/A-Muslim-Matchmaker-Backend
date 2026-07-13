@@ -75,14 +75,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
             logger.info("Chat WS connected: %s -> room %s", self.user.email, self.room_id)
 
-            await self.send(
-                text_data=json.dumps(
-                    {
-                        "type": "connection_established",
-                        "room_id": str(self.room_id),
-                        "user_id": str(self.user.id),
-                    }
-                )
+            await self._send_json(
+                {
+                    "type": "connection_established",
+                    "room_id": str(self.room_id),
+                    "user_id": str(self.user.id),
+                }
             )
         except Exception:
             logger.exception(
@@ -97,71 +95,124 @@ class ChatConsumer(AsyncWebsocketConsumer):
             logger.info("Chat WS disconnected: room %s (code=%s)", self.room_id, close_code)
 
     async def receive(self, text_data):
+        if text_data is None:
+            return
+
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:
+            data = text_data.strip()
+        except Exception:
+            logger.exception("Chat WS receive JSON parse failed for room %s", getattr(self, "room_id", None))
             return
 
-        if not isinstance(data, dict):
-            await self.send(
-                text_data=json.dumps(
+        if isinstance(data, str):
+            message_text = data.strip()
+            if not message_text:
+                await self._send_json(
                     {
                         "type": "error",
-                        "detail": "WebSocket payload must be a JSON object.",
+                        "detail": "Message text cannot be empty.",
                     }
                 )
+                return
+
+            try:
+                await self._create_message(message_text)
+            except Exception:
+                logger.exception("Chat WS text message send failed for room %s", getattr(self, "room_id", None))
+                await self._send_json(
+                    {
+                        "type": "error",
+                        "detail": "Unable to send websocket message.",
+                    }
+                )
+            return
+
+        if isinstance(data, (int, float, bool)):
+            data = {"action": "send_message", "text": str(data)}
+
+        if not isinstance(data, dict):
+            await self._send_json(
+                {
+                    "type": "error",
+                    "detail": "WebSocket payload must be a JSON object.",
+                }
             )
             return
 
-        action = data.get("action")
+        try:
+            action = data.get("action")
 
-        if action == "mark_read":
-            count = await self._mark_messages_read()
-            await self.send(
-                text_data=json.dumps(
+            if action == "mark_read":
+                count = await self._mark_messages_read()
+                await self._send_json(
                     {
                         "type": "mark_read_response",
                         "marked_count": count,
                     }
                 )
-            )
 
-        elif action == "ping":
-            await self.send(text_data=json.dumps({"type": "pong"}))
+            elif action == "ping":
+                await self._send_json({"type": "pong"})
 
-        else:
-            await self.send(
-                text_data=json.dumps(
+            elif action == "send_message":
+                message_text = (data.get("text") or "").strip()
+                if not message_text:
+                    await self._send_json(
+                        {
+                            "type": "error",
+                            "detail": "Message text cannot be empty.",
+                        }
+                    )
+                    return
+
+                await self._create_message(message_text)
+
+            else:
+                await self._send_json(
                     {
                         "type": "error",
-                        "detail": "Unsupported action. Use 'ping' or 'mark_read'.",
+                        "detail": "Unsupported action. Use 'send_message', 'ping', or 'mark_read'.",
                     }
                 )
+        except Exception:
+            logger.exception("Chat WS receive handler failed for room %s", getattr(self, "room_id", None))
+            await self._send_json(
+                {
+                    "type": "error",
+                    "detail": "Unable to process websocket action.",
+                }
             )
 
     async def chat_message(self, event):
         """Receive a new message from ChatService and forward it to the client."""
-        await self.send(
-            text_data=json.dumps(
+        try:
+            await self._send_json(
                 {
                     "type": "chat_message",
-                    "message": event["message"],
+                    "message": event.get("message"),
                 }
             )
-        )
+        except Exception:
+            logger.exception("Chat WS chat_message event failed for room %s", getattr(self, "room_id", None))
 
     async def read_receipt(self, event):
         """Receive a read-receipt event and forward it to the client."""
-        await self.send(
-            text_data=json.dumps(
+        try:
+            await self._send_json(
                 {
                     "type": "read_receipt",
-                    "message_ids": event["message_ids"],
-                    "read_by": event["read_by"],
-                    "read_at": event["read_at"],
+                    "message_ids": event.get("message_ids", []),
+                    "read_by": event.get("read_by"),
+                    "read_at": event.get("read_at"),
                 }
             )
-        )
+        except Exception:
+            logger.exception("Chat WS read_receipt event failed for room %s", getattr(self, "room_id", None))
+
+    async def _send_json(self, payload: dict) -> None:
+        await self.send(text_data=json.dumps(payload, default=str))
 
     def _extract_token(self) -> str:
         qs = self.scope.get("query_string", b"").decode()
@@ -169,6 +220,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
             if part.startswith("token="):
                 return part[len("token="):]
         return ""
+
+    @database_sync_to_async
+    def _create_message(self, text: str):
+        from .models import ChatRoom
+        from .services import ChatService
+
+        room = ChatRoom.objects.get(id=self.room_id)
+        return ChatService.send_message(
+            room=room,
+            sender=self.user,
+            text=text,
+            attachment=None,
+        )
 
     @database_sync_to_async
     def _get_user_from_token(self, token: str):
