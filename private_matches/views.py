@@ -23,6 +23,7 @@ from users.permissions import IsAdminUser, IsNormalUser
 from .models import PrivateMatchSuggestion, SuggestionStatus
 from .serializers import *
 from .services import PrivateMatchService
+from core.pagination import FlexiblePageNumberPagination
 
 
 logger = logging.getLogger(__name__)
@@ -304,6 +305,7 @@ class AdminProspectDirectoryView(APIView):
     Available to: Matchmaker, Superadmin.
     """
     permission_classes = [IsAdminUser]
+    pagination_class   = FlexiblePageNumberPagination
 
     @extend_schema(
         summary="Admin — Browse prospects for a private client",
@@ -316,6 +318,8 @@ class AdminProspectDirectoryView(APIView):
             OpenApiParameter("private_client_id", str, required=True,
                 description="UUID of the private client — used to determine gender filter."),
             OpenApiParameter("search", str, description="Search by codename, name, or email."),
+            OpenApiParameter("page", int, description="Page number."),
+            OpenApiParameter("page_size", int, description="Number of results per page."),
         ],
         responses={200: AdminProspectDirectorySerializer(many=True)},
     )
@@ -341,7 +345,7 @@ class AdminProspectDirectoryView(APIView):
 
         qs = User.objects.filter(role__in=prospect_roles, is_active=True).exclude(
             id=private_client.id
-        )
+        ).order_by("id")
 
         search = request.query_params.get("search")
         if search:
@@ -352,11 +356,18 @@ class AdminProspectDirectoryView(APIView):
                 | Q(email__icontains=search)
             )
 
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+
         from private_matches.serializers import _user_card
+        target_qs = page if page is not None else qs
         result = []
-        for u in qs:
+        for u in target_qs:
             card = _user_card(u, request)
             card["is_private_matchmaking_client"] = u.is_private_matchmaking_client
             result.append(card)
+
+        if page is not None:
+            return paginator.get_paginated_response(result)
 
         return Response(result, status=status.HTTP_200_OK)
