@@ -102,6 +102,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except json.JSONDecodeError:
             return
 
+        if not isinstance(data, dict):
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "error",
+                        "detail": "WebSocket payload must be a JSON object.",
+                    }
+                )
+            )
+            return
+
         action = data.get("action")
 
         if action == "mark_read":
@@ -117,6 +128,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         elif action == "ping":
             await self.send(text_data=json.dumps({"type": "pong"}))
+
+        else:
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "error",
+                        "detail": "Unsupported action. Use 'ping' or 'mark_read'.",
+                    }
+                )
+            )
 
     async def chat_message(self, event):
         """Receive a new message from ChatService and forward it to the client."""
