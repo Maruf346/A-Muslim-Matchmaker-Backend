@@ -729,6 +729,9 @@ class AdminUserListSerializer(serializers.ModelSerializer):
     city = serializers.SerializerMethodField()
     country = serializers.SerializerMethodField()
     profile_completion_percentage = serializers.SerializerMethodField()
+    first_name = serializers.SerializerMethodField()
+    last_name = serializers.SerializerMethodField()
+    gender = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -770,6 +773,34 @@ class AdminUserListSerializer(serializers.ModelSerializer):
         if seconds < 86400:
             return f"Active {seconds // 3600} hr(s) ago"
         return f"Active {seconds // 86400} day(s) ago"
+
+    def get_first_name(self, obj) -> str | None:
+        from users.models import UserRole
+        if obj.role == UserRole.WALI:
+            wali_info = getattr(obj, "wali_basic_info", None)
+            if wali_info:
+                return wali_info.sister_first_name
+            from questions.models import WaliBasicInfo
+            wali_info = WaliBasicInfo.objects.filter(user=obj).first()
+            return getattr(wali_info, "sister_first_name", None) or obj.first_name
+        return obj.first_name
+
+    def get_last_name(self, obj) -> str | None:
+        from users.models import UserRole
+        if obj.role == UserRole.WALI:
+            wali_info = getattr(obj, "wali_basic_info", None)
+            if wali_info:
+                return wali_info.sister_last_name
+            from questions.models import WaliBasicInfo
+            wali_info = WaliBasicInfo.objects.filter(user=obj).first()
+            return getattr(wali_info, "sister_last_name", None) or obj.last_name
+        return obj.last_name
+
+    def get_gender(self, obj) -> str | None:
+        from users.models import UserRole
+        if obj.role == UserRole.WALI:
+            return "female"
+        return obj.gender
 
     def _get_basic_info(self, obj):
         """

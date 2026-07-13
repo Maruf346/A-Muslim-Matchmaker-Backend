@@ -21,13 +21,28 @@ def _basic_info(user):
 
 def _user_card(user, request) -> dict:
     info = _basic_info(user)
+
+    from users.models import UserRole
+    if user.role == UserRole.WALI:
+        from questions.models import WaliBasicInfo
+        wali_info = getattr(user, "wali_basic_info", None)
+        if wali_info is None:
+            wali_info = WaliBasicInfo.objects.filter(user=user).first()
+        first_name = getattr(wali_info, "sister_first_name", None) or user.first_name
+        last_name = getattr(wali_info, "sister_last_name", None) or user.last_name
+        gender = "female"
+    else:
+        first_name = user.first_name
+        last_name = user.last_name
+        gender = user.gender
+
     return {
         "id":              str(user.id),
         "codename":        user.codename,
-        "first_name":      user.first_name,
-        "last_name":       user.last_name,
+        "first_name":      first_name,
+        "last_name":       last_name,
         "role":            user.role,
-        "gender":          user.gender,
+        "gender":          gender,
         "profile_picture": request.build_absolute_uri(user.profile_picture.url)
                            if user.profile_picture and request else None,
         "city":            getattr(info, "city", None),

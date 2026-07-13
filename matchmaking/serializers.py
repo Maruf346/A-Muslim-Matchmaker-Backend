@@ -65,13 +65,28 @@ class AdminRequestListSerializer(serializers.ModelSerializer):
         u = obj.user
         info = self._get_basic_info(u)
         request = self.context.get("request")
+
+        from users.models import UserRole
+        if u.role == UserRole.WALI:
+            from questions.models import WaliBasicInfo
+            wali_info = getattr(u, "wali_basic_info", None)
+            if wali_info is None:
+                wali_info = WaliBasicInfo.objects.filter(user=u).first()
+            first_name = getattr(wali_info, "sister_first_name", None) or u.first_name
+            last_name = getattr(wali_info, "sister_last_name", None) or u.last_name
+            gender = "female"
+        else:
+            first_name = u.first_name
+            last_name = u.last_name
+            gender = u.gender
+
         return {
             "id":              str(u.id),
             "codename":        u.codename,
-            "first_name":      u.first_name,
-            "last_name":       u.last_name,
+            "first_name":      first_name,
+            "last_name":       last_name,
             "role":            u.role,
-            "gender":          u.gender,
+            "gender":          gender,
             "profile_picture": request.build_absolute_uri(u.profile_picture.url)
                                if u.profile_picture and request else None,
             "city":            getattr(info, "city", None),
