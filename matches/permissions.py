@@ -38,14 +38,12 @@ class IsParticipantInMatch(BasePermission):
 class CanSendConnectionRequest(BasePermission):
     """
     Checks subscription-based permission to send a NEW connection request.
-    Free users cannot send requests at all.
-    Monthly users have a per-cycle limit (checked in the service layer).
-    Annual users have unlimited requests.
+    Subscription caps are enforced in the service layer.
 
-    This permission only blocks FREE users outright — Monthly limit
-    checks happen in MatchService since they require querying usage count.
+    This permission only blocks accounts that can never use the standard
+    request flow (for example, private matchmaking clients).
     """
-    message = "Your subscription plan does not allow sending connection requests. Please upgrade to Monthly or Annual."
+    message = "This account cannot send standard connection requests."
 
     def has_permission(self, request, view):
         user = request.user
@@ -56,7 +54,4 @@ class CanSendConnectionRequest(BasePermission):
         if user.is_private_matchmaking_client:
             return False
         
-        # Free users cannot send requests at all
-        if user.subscription_plan == "free":
-            return False
         return True

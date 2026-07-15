@@ -5,15 +5,13 @@ Service layer for the matches app — keeps views thin and business logic
 testable.
 
 Classes:
-    SubscriptionLimitService — enforces monthly connection request limits
+    SubscriptionLimitService — enforces plan-based connection request limits
     MatchService             — connection request lifecycle, photo cycle,
                                 wali request cycle, status transitions
 """
 
 import logging
-from datetime import timedelta
 
-from django.db import models
 from django.utils import timezone
 
 from notifications.services import NotificationTemplates
@@ -32,7 +30,7 @@ class SubscriptionLimitService:
     Enforces connection-request limits based on subscription plan.
 
     Plan rules:
-        FREE    → cannot send requests (blocked at permission level)
+        FREE    → 2 connection requests total on the free plan
         MONTHLY → 10 connection requests per cycle
                   Cycle resets on the user's subscription_start anniversary
                   each month (e.g. subscribed on the 15th → cycle renews
@@ -40,14 +38,29 @@ class SubscriptionLimitService:
         ANNUAL  → unlimited
     """
 
+    FREE_REQUEST_LIMIT = 2
     MONTHLY_REQUEST_LIMIT = 10
+
+    @classmethod
+    def get_plan_request_limit(cls, user) -> int | None:
+        """Return the request cap for the user's current plan, or None if unlimited."""
+        if user.subscription_plan == "annual":
+            return None
+        if user.subscription_plan == "monthly":
+            return cls.MONTHLY_REQUEST_LIMIT
+        return cls.FREE_REQUEST_LIMIT
 
     @classmethod
     def get_current_cycle_start(cls, user) -> "timezone.datetime":
         """
-        Compute the start of the user's current monthly billing cycle
-        based on their subscription_start anniversary day.
+        Compute the start of the user's active request-counting window.
+
+        Free users are lifetime-capped from account creation.
+        Monthly/annual users use their subscription anniversary cycle.
         """
+        if user.subscription_plan == "free":
+            return user.created_at
+
         now = timezone.now()
         sub_start = user.subscription_start or user.created_at
 
@@ -75,7 +88,7 @@ class SubscriptionLimitService:
 
     @classmethod
     def get_requests_sent_this_cycle(cls, user) -> int:
-        """Count connection requests sent by this user since cycle start."""
+        """Count connection requests sent by this user in the active plan window."""
         cycle_start = cls.get_current_cycle_start(user)
         return Match.objects.filter(
             initiated_by=user,
@@ -86,20 +99,20 @@ class SubscriptionLimitService:
     def can_send_request(cls, user) -> tuple[bool, str]:
         """
         Returns (allowed: bool, reason: str).
-        FREE is already blocked at the permission layer, but checked here too
-        for safety.
         """
-        if user.subscription_plan == "free":
-            return False, "Free plan does not allow sending connection requests. Please upgrade."
-
-        if user.subscription_plan == "annual":
+        limit = cls.get_plan_request_limit(user)
+        if limit is None:
             return True, ""
 
-        # Monthly — check limit
         sent = cls.get_requests_sent_this_cycle(user)
-        if sent >= cls.MONTHLY_REQUEST_LIMIT:
+        if sent >= limit:
+            if user.subscription_plan == "free":
+                return False, (
+                    f"Free users can send up to {cls.FREE_REQUEST_LIMIT} connection requests. "
+                    "Upgrade to Monthly or Annual for more."
+                )
+
             cycle_start = cls.get_current_cycle_start(user)
-            next_reset  = cycle_start + timedelta(days=30)  # approximate, anniversary-based
             return False, (
                 f"You have reached your monthly limit of {cls.MONTHLY_REQUEST_LIMIT} "
                 f"connection requests. Your limit resets on your subscription "
@@ -110,13 +123,12 @@ class SubscriptionLimitService:
 
     @classmethod
     def get_remaining_requests(cls, user) -> int | None:
-        """Returns remaining requests this cycle, or None if unlimited."""
-        if user.subscription_plan == "annual":
+        """Returns remaining requests in the active plan window, or None if unlimited."""
+        limit = cls.get_plan_request_limit(user)
+        if limit is None:
             return None
-        if user.subscription_plan == "free":
-            return 0
         sent = cls.get_requests_sent_this_cycle(user)
-        return max(0, cls.MONTHLY_REQUEST_LIMIT - sent)
+        return max(0, limit - sent)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

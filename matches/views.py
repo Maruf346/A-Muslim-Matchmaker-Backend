@@ -374,7 +374,7 @@ class SendConnectionRequestView(APIView):
         description=(
             "Male sends a connection request to a Female or Wali profile by `target_user_id`.\n\n"
             "**Subscription rules:**\n"
-            "- Free: blocked (403)\n"
+            "- Free: limited to 2 requests total\n"
             "- Monthly: limited to 10 requests per billing cycle (anniversary-based)\n"
             "- Annual: unlimited\n\n"
             "If a connection already exists with this user, returns 400."
@@ -383,7 +383,7 @@ class SendConnectionRequestView(APIView):
         responses={
             201: MatchDetailSerializer,
             400: OpenApiResponse(description="Already connected, limit reached, or validation error."),
-            403: OpenApiResponse(description="Free plan — subscription required."),
+            403: OpenApiResponse(description="This account cannot use standard connection requests."),
         },
     )
     def post(self, request):
@@ -993,7 +993,7 @@ class RespondToWaliRequestView(APIView):
 class ConnectionUsageView(APIView):
     """
     GET — Returns the authenticated user's connection request usage
-    for the current billing cycle.
+    for the current plan window.
     Available to: Male only (only Male sends requests).
     """
     permission_classes = [IsMaleUser]
@@ -1002,8 +1002,10 @@ class ConnectionUsageView(APIView):
         summary="Get my connection request usage",
         description=(
             "Returns subscription plan, requests sent this cycle, and remaining "
-            "requests. `requests_remaining` and `monthly_limit` are `null` for "
-            "Annual (unlimited)."
+            "requests. Free users are counted against a lifetime cap of 2 from "
+            "account creation. Monthly users get 10 per billing cycle. "
+            "`requests_remaining` and `monthly_limit` are `null` for Annual "
+            "(unlimited)."
         ),
         responses={200: ConnectionUsageSerializer},
     )
@@ -1012,10 +1014,7 @@ class ConnectionUsageView(APIView):
         sent       = SubscriptionLimitService.get_requests_sent_this_cycle(user)
         remaining  = SubscriptionLimitService.get_remaining_requests(user)
         cycle_start = SubscriptionLimitService.get_current_cycle_start(user)
-        monthly_limit = (
-            SubscriptionLimitService.MONTHLY_REQUEST_LIMIT
-            if user.subscription_plan == "monthly" else None
-        )
+        monthly_limit = SubscriptionLimitService.get_plan_request_limit(user)
 
         data = {
             "subscription_plan":  user.subscription_plan,
