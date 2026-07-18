@@ -70,6 +70,20 @@ def _get_basic_info_serializer(instance, context):
     return None
 
 
+def _get_directory_first_name(user) -> str | None:
+    info = _get_basic_info(user)
+    if user.role == UserRole.WALI and info:
+        return getattr(info, "sister_first_name", None) or user.first_name
+    return user.first_name
+
+
+def _get_directory_last_name(user) -> str | None:
+    info = _get_basic_info(user)
+    if user.role == UserRole.WALI and info:
+        return getattr(info, "sister_last_name", None) or user.last_name
+    return user.last_name
+
+
 def _get_display_name(user, has_mutual_interest: bool) -> str:
     """
     Returns the display name for a user.
@@ -123,6 +137,8 @@ class DirectoryProfileSerializer(serializers.Serializer):
     """
     id                    = serializers.UUIDField()
     codename              = serializers.CharField()
+    first_name            = serializers.SerializerMethodField()
+    last_name             = serializers.SerializerMethodField()
     role                  = serializers.CharField()
     gender                = serializers.CharField()
     subscription_plan     = serializers.CharField()
@@ -140,6 +156,12 @@ class DirectoryProfileSerializer(serializers.Serializer):
 
     def get_last_active_display(self, obj) -> str | None:
         return _last_active_display(obj)
+
+    def get_first_name(self, obj) -> str | None:
+        return _get_directory_first_name(obj)
+
+    def get_last_name(self, obj) -> str | None:
+        return _get_directory_last_name(obj)
 
     def get_completion_percentage(self, obj) -> int:
         info = _get_basic_info(obj)
