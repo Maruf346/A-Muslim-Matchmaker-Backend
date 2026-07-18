@@ -151,6 +151,7 @@ class DirectoryProfileSerializer(serializers.Serializer):
     sect                  = serializers.SerializerMethodField()
     marital_status        = serializers.SerializerMethodField()
     height                = serializers.SerializerMethodField()
+    photos                = serializers.SerializerMethodField()
     has_boosted_profile   = serializers.BooleanField()
     photo_blurred         = serializers.SerializerMethodField()
 
@@ -191,18 +192,29 @@ class DirectoryProfileSerializer(serializers.Serializer):
         info = _get_basic_info(obj)
         return getattr(info, "height", None) if info else None
 
+    def get_photos(self, obj) -> list:
+        photos = UserPhoto.objects.filter(user=obj)
+        return UserPhotoSerializer(photos, many=True, context=self.context).data
+
     def get_photo_blurred(self, obj) -> bool:
         """Always True in directory view — no mutual interest established."""
         return True
+
+
+class DirectoryProfileDetailProfileSerializer(DirectoryProfileSerializer):
+    def get_fields(self):
+        fields = super().get_fields()
+        fields.pop("photos", None)
+        return fields
 
 
 class DirectoryProfileDetailSerializer(serializers.Serializer):
     profile = serializers.SerializerMethodField()
     basic_info = serializers.SerializerMethodField()
 
-    @extend_schema_field(DirectoryProfileSerializer)
+    @extend_schema_field(DirectoryProfileDetailProfileSerializer)
     def get_profile(self, obj) -> dict:
-        return DirectoryProfileSerializer(obj, context=self.context).data
+        return DirectoryProfileDetailProfileSerializer(obj, context=self.context).data
 
     @extend_schema_field(
         PolymorphicProxySerializer(
