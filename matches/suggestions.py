@@ -99,6 +99,28 @@ def _has_any_preferences(info) -> bool:
     return has_age or has_marital or has_ethnic
 
 
+def _get_already_connected_user_ids(user) -> set:
+    """
+    Return user IDs that should be excluded from suggestions because
+    the requester already has an active request/match with them.
+
+    This includes accepted matches, pending requests, and later-stage
+    match states. Final/separated states are allowed back into suggestions.
+    """
+    from matches.models import Match, MatchStatus
+
+    active_matches = Match.objects.filter(
+        Q(male_user=user) | Q(other_user=user)
+    ).exclude(
+        status__in=[MatchStatus.DECLINED, MatchStatus.CANCELLED, MatchStatus.DROPPED]
+    )
+
+    connected_ids = set(active_matches.values_list("male_user_id", flat=True))
+    connected_ids.update(active_matches.values_list("other_user_id", flat=True))
+    connected_ids.discard(user.id)
+    return connected_ids
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scoring
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,7 +225,6 @@ def get_suggested_matches(user, limit: int = 50) -> list[dict]:
     """
     from users.models import UserRole
     from wishlists.services import VisibilityService
-    from matches.models import Match, MatchStatus
 
     requester_info = _get_info(user)
     if not _has_any_preferences(requester_info):
@@ -227,25 +248,8 @@ def get_suggested_matches(user, limit: int = 50) -> list[dict]:
     if excluded_ids:
         candidates = candidates.exclude(id__in=excluded_ids)
 
-    # Exclude users already connected (any active Match status)
-    already_connected_ids = set(
-        Match.objects.filter(
-            Q(male_user=user) | Q(other_user=user)
-        ).exclude(
-            status__in=[MatchStatus.DECLINED, MatchStatus.CANCELLED, MatchStatus.DROPPED]
-        ).values_list(
-            "male_user_id", flat=True
-        )
-    ) | set(
-        Match.objects.filter(
-            Q(male_user=user) | Q(other_user=user)
-        ).exclude(
-            status__in=[MatchStatus.DECLINED, MatchStatus.CANCELLED, MatchStatus.DROPPED]
-        ).values_list(
-            "other_user_id", flat=True
-        )
-    )
-    already_connected_ids.discard(user.id)
+    # Exclude users already matched or otherwise actively connected
+    already_connected_ids = _get_already_connected_user_ids(user)
     if already_connected_ids:
         candidates = candidates.exclude(id__in=already_connected_ids)
 

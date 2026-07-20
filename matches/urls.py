@@ -88,9 +88,9 @@ urlpatterns = [
     path("<uuid:pk>/wali/respond/", RespondToWaliRequestView.as_view(),  name="match-wali-respond"),
 
     # ── Admin (router — namespaced under admin/ so it never collides with "") ──
-    path("", include(router.urls)),
+    path("", MatchListView.as_view(), name="match-list"),
 
     # ── Match list/detail (must come LAST — catch-all for "" and "<uuid:pk>/") ──
-    path("", MatchListView.as_view(), name="match-list"),
+    path("", include(router.urls)),
     path("<uuid:pk>/", MatchDetailView.as_view(), name="match-detail"),
 ]

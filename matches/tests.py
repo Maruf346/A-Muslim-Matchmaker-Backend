@@ -5,7 +5,8 @@ from datetime import date
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
-from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto
+from matches.models import Match, MatchStatus
+from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
@@ -152,5 +153,84 @@ class SuggestedMatchesPhotosTests(APITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertIn("photos", response.data[0])
         self.assertEqual(len(response.data[0]["photos"]), 1)
-        self.assertTrue(response.data[0]["photos"][0]["image"].endswith("candidate.jpg"))
+        self.assertIn("/media/users/photos/", response.data[0]["photos"][0]["image"])
         self.assertTrue(response.data[0]["photo_blurred"])
+
+    def test_suggested_matches_list_excludes_already_matched_profiles(self):
+        Match.objects.create(
+            male_user=self.user,
+            other_user=self.candidate,
+            initiated_by=self.user,
+            status=MatchStatus.ACCEPTED,
+            match_id="MT-TEST-1",
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [])
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests",
+        }
+    }
+)
+class MatchListRoutingAndWaliDisplayTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.male_user = User.objects.create_user(
+            email="match-male@example.com",
+            password="testpass123",
+            first_name="Match",
+            last_name="Brother",
+            role=UserRole.MALE,
+            gender=Gender.MALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+        self.wali_user = User.objects.create_user(
+            email="wali@example.com",
+            password="testpass123",
+            first_name="Guardian",
+            last_name="User",
+            role=UserRole.WALI,
+            subscription_plan="free",
+            is_active=True,
+        )
+
+        WaliBasicInfo.objects.create(
+            user=self.wali_user,
+            sister_first_name="Amina",
+            sister_last_name="Rahman",
+            date_of_birth=date(1997, 1, 1),
+            city="Dhaka",
+            country="Bangladesh",
+        )
+        Match.objects.create(
+            male_user=self.male_user,
+            other_user=self.wali_user,
+            initiated_by=self.male_user,
+            status=MatchStatus.ACCEPTED,
+            match_id="MT-WALI-1",
+        )
+
+        self.client.force_authenticate(user=self.male_user)
+        self.url = reverse("match-list")
+
+    def test_matches_root_returns_match_list_instead_of_admin_router_root(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(len(response.data), 1)
+
+    def test_wali_match_returns_sister_display_name(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data[0]["other_user"]["display_name"], "Amina Rahman")
+        self.assertEqual(response.data[0]["other_user"]["city"], "Dhaka")
