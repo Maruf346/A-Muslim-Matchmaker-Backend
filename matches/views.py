@@ -579,7 +579,7 @@ class ResendRequestView(APIView):
 class MatchListView(APIView):
     """
     GET — List all matches for the authenticated user where mutual
-    interest has been established (status != PENDING/DECLINED).
+    interest has been established and the connection is still active.
     Available to: Male, Female, Wali.
     """
     permission_classes = [IsNormalUser]
@@ -587,9 +587,9 @@ class MatchListView(APIView):
     @extend_schema(
         summary="List my matches",
         description=(
-            "Returns all matches with mutual interest established "
+            "Returns all non-cancelled matches with mutual interest established "
             "(ACCEPTED, WALI_REQUESTED, WALI_ACCEPTED, IN_DISCUSSION, MARRIED, "
-            "CANCELLED, DROPPED). Filter by `status` query param if needed."
+            "DROPPED). Filter by `status` query param if needed."
         ),
         parameters=[
             OpenApiParameter("status", str, description="Filter by match status."),
@@ -599,7 +599,7 @@ class MatchListView(APIView):
     def get(self, request):
         user = request.user
         qs = Match.objects.filter(Q(male_user=user) | Q(other_user=user)).exclude(
-            status__in=[MatchStatus.PENDING, MatchStatus.DECLINED]
+            status__in=[MatchStatus.PENDING, MatchStatus.DECLINED, MatchStatus.CANCELLED]
         )
 
         status_filter = request.query_params.get("status")

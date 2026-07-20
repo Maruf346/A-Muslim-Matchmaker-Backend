@@ -335,6 +335,21 @@ class MatchListPhotosTests(APITestCase):
         self.assertEqual(len(response.data[0]["other_user"]["photos"]), 1)
         self.assertTrue(response.data[0]["other_user"]["photo_blurred"])
 
+    def test_cancelled_match_is_excluded_from_match_list(self):
+        Match.objects.create(
+            male_user=self.male_user,
+            other_user=self.female_user,
+            initiated_by=self.male_user,
+            status=MatchStatus.CANCELLED,
+            match_id="MT-CANCELLED-1",
+        )
+
+        self.client.force_authenticate(user=self.female_user)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [])
+
 
 @override_settings(
     CACHES={
