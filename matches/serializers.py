@@ -434,6 +434,7 @@ class MatchDetailSerializer(serializers.ModelSerializer):
 class MatchListSerializer(serializers.ModelSerializer):
     """Compact representation for listing matches (lighter than detail)."""
     other_user = serializers.SerializerMethodField()
+    photos = serializers.SerializerMethodField()
     photo_requested_by_other_user = serializers.SerializerMethodField()
 
     class Meta:
@@ -441,6 +442,7 @@ class MatchListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "match_id", "status",
             "other_user",
+            "photos",
             "photo_request_status",
             "photo_requested_by_other_user",
             "photos_currently_visible",
@@ -455,6 +457,13 @@ class MatchListSerializer(serializers.ModelSerializer):
         other_user = obj.other_party(viewer) if viewer else obj.other_user
         ctx = {**self.context, "match": obj}
         return MatchedProfileSerializer(other_user, context=ctx).data
+
+    def get_photos(self, obj) -> list:
+        request = self.context.get("request")
+        viewer = request.user if request else None
+        other_user = obj.other_party(viewer) if viewer else obj.other_user
+        ctx = {**self.context, "match": obj}
+        return MatchedProfileSerializer(other_user, context=ctx).data["photos"]
 
     def get_photo_requested_by_other_user(self, obj) -> bool:
         request = self.context.get("request")
