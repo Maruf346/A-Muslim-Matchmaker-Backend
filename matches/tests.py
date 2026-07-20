@@ -1,9 +1,17 @@
+import shutil
+import tempfile
+from datetime import date
+
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
+from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from users.models import Gender, User, UserRole
+
+TEST_MEDIA_ROOT = tempfile.mkdtemp()
 
 
 @override_settings(
@@ -72,3 +80,77 @@ class FreePlanConnectionRequestTests(APITestCase):
 
         self.assertEqual(third_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("Free users can send up to 2 connection requests", third_response.data["error"])
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests",
+        }
+    },
+    MEDIA_ROOT=TEST_MEDIA_ROOT,
+)
+class SuggestedMatchesPhotosTests(APITestCase):
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(TEST_MEDIA_ROOT, ignore_errors=True)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="monthly-male@example.com",
+            password="testpass123",
+            first_name="Monthly",
+            last_name="Brother",
+            role=UserRole.MALE,
+            gender=Gender.MALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+        self.candidate = User.objects.create_user(
+            email="candidate@example.com",
+            password="testpass123",
+            first_name="Candidate",
+            last_name="Sister",
+            role=UserRole.FEMALE,
+            gender=Gender.FEMALE,
+            subscription_plan="free",
+            is_active=True,
+        )
+
+        MaleBasicInfo.objects.create(
+            user=self.user,
+            date_of_birth=date(1992, 1, 1),
+            pref_age_min=25,
+            pref_age_max=35,
+        )
+        FemaleBasicInfo.objects.create(
+            user=self.candidate,
+            date_of_birth=date(1995, 1, 1),
+            pref_age_min=30,
+            pref_age_max=40,
+        )
+        UserPhoto.objects.create(
+            user=self.candidate,
+            image=SimpleUploadedFile(
+                "candidate.jpg",
+                b"filecontent",
+                content_type="image/jpeg",
+            ),
+            is_primary=True,
+        )
+
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("suggestions-list")
+
+    def test_suggested_matches_list_includes_photos_array(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertIn("photos", response.data[0])
+        self.assertEqual(len(response.data[0]["photos"]), 1)
+        self.assertTrue(response.data[0]["photos"][0]["image"].endswith("candidate.jpg"))
+        self.assertTrue(response.data[0]["photo_blurred"])

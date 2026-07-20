@@ -21,8 +21,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
+from questions.serializers import UserPhotoSerializer
 from users.models import UserRole
-from users.permissions import IsNormalUser, IsSubscribed
+from users.permissions import IsNormalUser
 
 from .suggestions import get_suggested_matches, _get_info
 
@@ -40,10 +41,6 @@ def _serialize_suggestion(user_obj, info, score: int, request) -> dict:
     Photos always blurred (no mutual interest) — frontend handles blur.
     Full name hidden — codename shown instead.
     """
-    primary_photo = UserPhoto.objects.filter(user=user_obj, is_primary=True).first()
-    if not primary_photo:
-        primary_photo = UserPhoto.objects.filter(user=user_obj).first()
-
     return {
         "id":                   str(user_obj.id),
         "codename":             user_obj.codename,
@@ -64,8 +61,12 @@ def _serialize_suggestion(user_obj, info, score: int, request) -> dict:
         "ethnicity":            getattr(info, "ethnicity", None) or [],
         "languages_spoken":     getattr(info, "languages_spoken", None) or [],
         # Photos blurred until mutual interest
+        "photos":               UserPhotoSerializer(
+            UserPhoto.objects.filter(user=user_obj),
+            many=True,
+            context={"request": request},
+        ).data,
         "photo_blurred":        True,
-        "profile_picture":      None,  # always hidden in suggestions view
         "completion_percentage": getattr(info, "completion_percentage", 0),
     }
 
@@ -105,8 +106,8 @@ SuggestionCardSchema = inline_serializer(
         "frame":                 drf_serializers.CharField(allow_null=True),
         "ethnicity":             drf_serializers.ListField(child=drf_serializers.CharField()),
         "languages_spoken":      drf_serializers.ListField(child=drf_serializers.CharField()),
+        "photos":                UserPhotoSerializer(many=True),
         "photo_blurred":         drf_serializers.BooleanField(),
-        "profile_picture":       drf_serializers.CharField(allow_null=True),
         "completion_percentage": drf_serializers.IntegerField(),
     },
 )
