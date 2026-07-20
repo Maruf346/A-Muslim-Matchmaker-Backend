@@ -242,6 +242,103 @@ class MatchListRoutingAndWaliDisplayTests(APITestCase):
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
             "LOCATION": "matches-tests",
         }
+    },
+    MEDIA_ROOT=TEST_MEDIA_ROOT,
+)
+class MatchListPhotosTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.male_user = User.objects.create_user(
+            email="photos-male@example.com",
+            password="testpass123",
+            first_name="Photo",
+            last_name="Brother",
+            role=UserRole.MALE,
+            gender=Gender.MALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+        self.female_user = User.objects.create_user(
+            email="photos-female@example.com",
+            password="testpass123",
+            first_name="Photo",
+            last_name="Sister",
+            role=UserRole.FEMALE,
+            gender=Gender.FEMALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+        FemaleBasicInfo.objects.create(
+            user=self.female_user,
+            date_of_birth=date(1996, 1, 1),
+            pref_age_min=28,
+            pref_age_max=38,
+        )
+        MaleBasicInfo.objects.create(
+            user=self.male_user,
+            date_of_birth=date(1991, 1, 1),
+            pref_age_min=24,
+            pref_age_max=34,
+        )
+        UserPhoto.objects.create(
+            user=self.male_user,
+            image=SimpleUploadedFile(
+                "match-photo.jpg",
+                b"filecontent",
+                content_type="image/jpeg",
+            ),
+            is_primary=True,
+        )
+        self.url = reverse("match-list")
+
+    def test_match_list_includes_other_user_photos_array_when_visible(self):
+        match = Match.objects.create(
+            male_user=self.male_user,
+            other_user=self.female_user,
+            initiated_by=self.male_user,
+            status=MatchStatus.ACCEPTED,
+            match_id="MT-PHOTO-1",
+            photos_currently_visible=True,
+            photos_revealed_count=1,
+        )
+
+        self.client.force_authenticate(user=self.female_user)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data[0]["id"], str(match.id))
+        self.assertIn("photos", response.data[0]["other_user"])
+        self.assertEqual(len(response.data[0]["other_user"]["photos"]), 1)
+        self.assertFalse(response.data[0]["other_user"]["photo_blurred"])
+
+    def test_female_user_can_see_photo_requested_by_other_user(self):
+        Match.objects.create(
+            male_user=self.male_user,
+            other_user=self.female_user,
+            initiated_by=self.male_user,
+            status=MatchStatus.ACCEPTED,
+            match_id="MT-PHOTO-2",
+            photo_request_status="requested",
+            photo_requested_by=self.male_user,
+            photos_currently_visible=False,
+        )
+
+        self.client.force_authenticate(user=self.female_user)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data[0]["photo_request_status"], "requested")
+        self.assertTrue(response.data[0]["photo_requested_by_other_user"])
+        self.assertEqual(response.data[0]["other_user"]["photos"], [])
+        self.assertTrue(response.data[0]["other_user"]["photo_blurred"])
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests",
+        }
     }
 )
 class AdminMatchPaginationTests(APITestCase):
