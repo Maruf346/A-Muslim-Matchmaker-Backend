@@ -234,3 +234,85 @@ class MatchListRoutingAndWaliDisplayTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data[0]["other_user"]["display_name"], "Amina Rahman")
         self.assertEqual(response.data[0]["other_user"]["city"], "Dhaka")
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests",
+        }
+    }
+)
+class AdminMatchPaginationTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin_user = User.objects.create_user(
+            email="matchmaker@example.com",
+            password="testpass123",
+            first_name="Match",
+            last_name="Maker",
+            role=UserRole.MATCHMAKER,
+            is_active=True,
+        )
+        self.groom = User.objects.create_user(
+            email="admin-groom@example.com",
+            password="testpass123",
+            first_name="Admin",
+            last_name="Groom",
+            role=UserRole.MALE,
+            gender=Gender.MALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+        self.bride_one = self._create_bride("admin-bride-one@example.com", "Bride", "One")
+        self.bride_two = self._create_bride("admin-bride-two@example.com", "Bride", "Two")
+        self.bride_three = self._create_bride("admin-bride-three@example.com", "Bride", "Three")
+
+        Match.objects.create(
+            male_user=self.groom,
+            other_user=self.bride_one,
+            initiated_by=self.groom,
+            status=MatchStatus.ACCEPTED,
+            match_id="MT-ADMIN-1",
+        )
+        Match.objects.create(
+            male_user=self.groom,
+            other_user=self.bride_two,
+            initiated_by=self.groom,
+            status=MatchStatus.PENDING,
+            match_id="MT-ADMIN-2",
+        )
+        Match.objects.create(
+            male_user=self.groom,
+            other_user=self.bride_three,
+            initiated_by=self.groom,
+            status=MatchStatus.DROPPED,
+            match_id="MT-ADMIN-3",
+        )
+
+        self.client.force_authenticate(user=self.admin_user)
+        self.url = reverse("admin-matches-list")
+
+    def _create_bride(self, email, first_name, last_name):
+        return User.objects.create_user(
+            email=email,
+            password="testpass123",
+            first_name=first_name,
+            last_name=last_name,
+            role=UserRole.FEMALE,
+            gender=Gender.FEMALE,
+            subscription_plan="free",
+            is_active=True,
+        )
+
+    def test_admin_matches_list_returns_paginated_response(self):
+        response = self.client.get(self.url, {"page_size": 2})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(response.data, dict)
+        self.assertEqual(response.data["count"], 3)
+        self.assertIn("next", response.data)
+        self.assertIn("previous", response.data)
+        self.assertIn("results", response.data)
+        self.assertEqual(len(response.data["results"]), 2)

@@ -21,6 +21,7 @@ from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
 )
+from core.pagination import FlexiblePageNumberPagination
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
@@ -1089,6 +1090,7 @@ class AdminMatchViewSet(viewsets.ReadOnlyModelViewSet):
     Available to: Matchmaker, Superadmin.
     """
     permission_classes = [IsAdminUser]
+    pagination_class   = FlexiblePageNumberPagination
     filter_backends    = [SearchFilter, OrderingFilter]
     search_fields      = [
         "match_id",
@@ -1147,11 +1149,14 @@ class AdminMatchViewSet(viewsets.ReadOnlyModelViewSet):
             "married_count": queryset.filter(status=MatchStatus.MARRIED).count(),
             "dropped_count": queryset.filter(status=MatchStatus.DROPPED).count(),
         }
-        serializer = self.get_serializer(
-            queryset,
-            many=True,
-            context={**self.get_serializer_context(), "match_counters": counters},
-        )
+        page = self.paginate_queryset(queryset)
+        serializer_context = {**self.get_serializer_context(), "match_counters": counters}
+
+        if page is not None:
+            serializer = self.get_serializer(page, many=True, context=serializer_context)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True, context=serializer_context)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
