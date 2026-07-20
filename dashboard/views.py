@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from drf_spectacular.utils import extend_schema
+from core.pagination import FlexiblePageNumberPagination
 from django.contrib.auth import get_user_model
 from django.db.models import Count
 from django.db.models.functions import TruncMonth
@@ -36,6 +37,7 @@ class RecentActivityListView(APIView):
     """
 
     permission_classes = [IsAdminUser]
+    pagination_class = FlexiblePageNumberPagination
 
     @extend_schema(
         summary="Admin — List recent activities",
@@ -49,6 +51,13 @@ class RecentActivityListView(APIView):
         queryset = RecentActivity.objects.select_related(
             "primary_user", "secondary_user", "actor_user"
         ).order_by("-created_at")
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+
+        if page is not None:
+            serializer = RecentActivitySerializer(page, many=True, context={"request": request})
+            return paginator.get_paginated_response(serializer.data)
+
         serializer = RecentActivitySerializer(queryset, many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
