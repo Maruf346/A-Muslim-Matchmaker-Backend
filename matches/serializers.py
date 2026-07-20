@@ -350,9 +350,6 @@ class MatchedProfileSerializer(serializers.Serializer):
         return not match.photos_currently_visible
 
     def get_photos(self, obj) -> list:
-        match = self._match()
-        if not match.photos_currently_visible:
-            return []
         photos = UserPhoto.objects.filter(user=obj)
         return UserPhotoSerializer(photos, many=True, context=self.context).data
 

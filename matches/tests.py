@@ -331,8 +331,8 @@ class MatchListPhotosTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data[0]["photo_request_status"], "requested")
         self.assertTrue(response.data[0]["photo_requested_by_other_user"])
-        self.assertEqual(response.data[0]["photos"], [])
-        self.assertEqual(response.data[0]["other_user"]["photos"], [])
+        self.assertEqual(len(response.data[0]["photos"]), 1)
+        self.assertEqual(len(response.data[0]["other_user"]["photos"]), 1)
         self.assertTrue(response.data[0]["other_user"]["photo_blurred"])
 
 
