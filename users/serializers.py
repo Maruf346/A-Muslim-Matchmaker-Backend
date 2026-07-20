@@ -510,6 +510,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     based on mutual interest — this serializer is owner-only.
     """
     last_active_display = serializers.SerializerMethodField()
+    profile_completion_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -530,6 +531,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "is_private_matchmaking_client",
             "last_active",
             "last_active_display",
+            "profile_completion_percentage",
             "created_at",
             "updated_at",
         ]
@@ -537,8 +539,25 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "id", "codename", "email", "role", "gender",
             "subscription_plan", "subscription_start", "subscription_end",
             "provider", "is_active", "is_private_matchmaking_client", "last_active", "last_active_display",
+            "profile_completion_percentage",
             "created_at", "updated_at",
         ]
+
+    def _get_basic_info(self, obj):
+        try:
+            if obj.role == UserRole.MALE:
+                return obj.male_basic_info
+            if obj.role == UserRole.FEMALE:
+                return obj.female_basic_info
+            if obj.role == UserRole.WALI:
+                return obj.wali_basic_info
+        except ObjectDoesNotExist:
+            return None
+        return None
+
+    def get_profile_completion_percentage(self, obj):
+        info = self._get_basic_info(obj)
+        return getattr(info, "completion_percentage", None) if info else None
 
     def get_last_active_display(self, obj) -> str | None:
         """Returns human-readable last active string."""
