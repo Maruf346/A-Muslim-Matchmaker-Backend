@@ -30,6 +30,8 @@ Full endpoint map:
     POST  /api/matches/<pk>/photos/request/               RequestPhotoViewView
     PATCH /api/matches/<pk>/photos/respond/?action=       RespondToPhotoRequestView
     POST  /api/matches/<pk>/photos/mark-viewed/           MarkPhotosViewedView
+    POST  /api/matches/<pk>/request-second-photo-view/    RequestSecondPhotoViewView
+    POST  /api/matches/<pk>/respond-photo-request/        RespondSecondPhotoRequestView
 
     ── Wali ─────────────────────────────────────────────────────────────────
     POST  /api/matches/<pk>/wali/request/                 SendWaliRequestView
@@ -82,6 +84,8 @@ urlpatterns = [
     path("<uuid:pk>/photos/request/",     RequestPhotoViewView.as_view(),     name="match-photo-request"),
     path("<uuid:pk>/photos/respond/",     RespondToPhotoRequestView.as_view(),name="match-photo-respond"),
     path("<uuid:pk>/photos/mark-viewed/", MarkPhotosViewedView.as_view(),     name="match-photo-mark-viewed"),
+    path("<uuid:pk>/request-second-photo-view/", RequestSecondPhotoViewView.as_view(), name="match-second-photo-request"),
+    path("<uuid:pk>/respond-photo-request/",     RespondSecondPhotoRequestView.as_view(), name="match-second-photo-respond"),
 
     # ── Wali ──────────────────────────────────────────────────────────────────
     path("<uuid:pk>/wali/request/", SendWaliRequestView.as_view(),       name="match-wali-request"),

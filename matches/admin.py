@@ -11,13 +11,16 @@ class MatchAdmin(admin.ModelAdmin):
         "other_user",
         "status",
         "photo_request_status",
+        "second_photo_request_status",
         "wali_request_status",
         "photos_revealed_count",
+        "photo_view_count",
         "created_at",
     )
     list_filter = (
         "status",
         "photo_request_status",
+        "second_photo_request_status",
         "wali_request_status",
         "photos_currently_visible",
         "created_at",
@@ -68,6 +71,8 @@ class MatchAdmin(admin.ModelAdmin):
                     "photo_requested_by",
                     "photos_currently_visible",
                     "photos_revealed_count",
+                    "photo_view_count",
+                    "second_photo_request_status",
                     "first_photos_revealed_at",
                     "last_photos_revealed_at",
                 )

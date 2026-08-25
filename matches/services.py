@@ -193,9 +193,19 @@ class MatchService:
         match.status       = MatchStatus.ACCEPTED
         match.responded_at = now
         match.accepted_at  = now
+        match.photos_currently_visible = True
+        match.photos_revealed_count += 1
+        match.photo_view_count = 1
+        match.first_photos_revealed_at = now
+        match.last_photos_revealed_at = now
         if not match.match_id:
             match.match_id = generate_match_id()
-        match.save(update_fields=["status", "responded_at", "accepted_at", "match_id", "updated_at"])
+        match.save(update_fields=[
+            "status", "responded_at", "accepted_at", "match_id",
+            "photos_currently_visible", "photos_revealed_count",
+            "photo_view_count", "first_photos_revealed_at",
+            "last_photos_revealed_at", "updated_at",
+        ])
         from dashboard.services import RecentActivityService
         RecentActivityService.match_created(match)
 
@@ -307,6 +317,7 @@ class MatchService:
             raise ValueError(
                 f"Match can only be cancelled from 'accepted' status. Current status: '{match.status}'."
             )
+
         if requester not in (match.male_user, match.other_user):
             raise ValueError("You are not a participant in this match.")
 
@@ -326,6 +337,105 @@ class MatchService:
         return match
 
     # ── Photo request cycle ───────────────────────────────────────────────────
+
+    @staticmethod
+    def request_second_photo_view(match: Match, requester) -> Match:
+        """
+        Male requests one final 60-second viewing window for the female/wali photos.
+        Transitions second_photo_request_status: NONE -> PENDING.
+        """
+        if requester != match.male_user:
+            raise ValueError("Only the male user can request to view photos one more time.")
+
+        if not match.is_mutual:
+            raise ValueError("Photo requests are only available after mutual interest.")
+        if match.photos_currently_visible:
+            raise ValueError("Photos are already currently visible.")
+        if match.photo_view_count < 1:
+            raise ValueError("The first photo viewing window has not been used yet.")
+        if match.photo_view_count >= 2:
+            raise ValueError("The one-time second photo view has already been used.")
+        if match.second_photo_request_status != SecondPhotoRequestStatus.NONE:
+            raise ValueError("The one-time second photo request has already been submitted.")
+
+        match.second_photo_request_status = SecondPhotoRequestStatus.PENDING
+        match.photo_request_status = PhotoRequestStatus.REQUESTED
+        match.photo_requested_by = requester
+        match.save(update_fields=[
+            "second_photo_request_status",
+            "photo_request_status",
+            "photo_requested_by",
+            "updated_at",
+        ])
+
+        try:
+            NotificationTemplates.photo_request_received(
+                receiver=match.other_user, requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("second photo_request_received notification failed for match %s", match.id)
+
+        return match
+
+    @staticmethod
+    def respond_second_photo_request(match: Match, responder, accepted: bool) -> Match:
+        """
+        Female/Wali accepts or rejects the male user's one-time second photo request.
+        On accept, grants the second 60-second viewing window.
+        """
+        if responder != match.other_user:
+            raise ValueError("Only the female/wali user can respond to this photo request.")
+        if match.second_photo_request_status != SecondPhotoRequestStatus.PENDING:
+            raise ValueError("There is no pending second photo request to respond to.")
+        if match.photo_requested_by_id != match.male_user_id:
+            raise ValueError("Invalid photo request state.")
+
+        requester = match.photo_requested_by
+
+        if not accepted:
+            match.second_photo_request_status = SecondPhotoRequestStatus.REJECTED
+            match.photo_request_status = PhotoRequestStatus.NONE
+            match.photo_requested_by = None
+            match.save(update_fields=[
+                "second_photo_request_status",
+                "photo_request_status",
+                "photo_requested_by",
+                "updated_at",
+            ])
+
+            try:
+                NotificationTemplates.photo_request_declined(
+                    requester=requester, match_id=match.match_id
+                )
+            except Exception:
+                logger.exception("second photo_request_declined notification failed for match %s", match.id)
+
+            return match
+
+        now = timezone.now()
+        match.second_photo_request_status = SecondPhotoRequestStatus.ACCEPTED
+        match.photo_request_status = PhotoRequestStatus.APPROVED
+        match.photos_currently_visible = True
+        match.photos_revealed_count += 1
+        match.photo_view_count = 2
+        match.last_photos_revealed_at = now
+        if not match.first_photos_revealed_at:
+            match.first_photos_revealed_at = now
+        match.save(update_fields=[
+            "second_photo_request_status", "photo_request_status",
+            "photos_currently_visible", "photos_revealed_count",
+            "photo_view_count", "last_photos_revealed_at",
+            "first_photos_revealed_at", "updated_at",
+        ])
+
+        try:
+            NotificationTemplates.photo_request_approved(
+                requester=requester, match_id=match.match_id
+            )
+        except Exception:
+            logger.exception("second photo_request_approved notification failed for match %s", match.id)
+
+        return match
 
     @staticmethod
     def request_photo_view(match: Match, requester) -> Match:
@@ -416,6 +526,21 @@ class MatchService:
             logger.exception("photo_request_declined notification failed for match %s", match.id)
 
         return match
+
+    @staticmethod
+    def request_photo_view(match: Match, requester) -> Match:
+        """Compatibility endpoint for the strict one-time second photo request."""
+        return MatchService.request_second_photo_view(match, requester)
+
+    @staticmethod
+    def approve_photo_request(match: Match, responder) -> Match:
+        """Compatibility endpoint for accepting the strict second photo request."""
+        return MatchService.respond_second_photo_request(match, responder, accepted=True)
+
+    @staticmethod
+    def decline_photo_request(match: Match, responder) -> Match:
+        """Compatibility endpoint for rejecting the strict second photo request."""
+        return MatchService.respond_second_photo_request(match, responder, accepted=False)
 
     @staticmethod
     def mark_photos_viewed(match: Match, viewer) -> Match:

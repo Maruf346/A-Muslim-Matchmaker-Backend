@@ -350,6 +350,9 @@ class MatchedProfileSerializer(serializers.Serializer):
         return not match.photos_currently_visible
 
     def get_photos(self, obj) -> list:
+        match = self._match()
+        if not match.photos_currently_visible:
+            return []
         photos = UserPhoto.objects.filter(user=obj)
         return UserPhotoSerializer(photos, many=True, context=self.context).data
 
@@ -410,7 +413,8 @@ class MatchDetailSerializer(serializers.ModelSerializer):
             "cancelled_by", "cancelled_at",
             "dropped_by", "dropped_at",
             "photo_request_status", "photos_currently_visible",
-            "photos_revealed_count",
+            "photos_revealed_count", "photo_view_count",
+            "second_photo_request_status",
             "first_photos_revealed_at", "last_photos_revealed_at",
             "wali_request_status", "wali_details_visible",
             "wali_requested_at", "wali_responded_at",
@@ -441,6 +445,8 @@ class MatchListSerializer(serializers.ModelSerializer):
             "other_user",
             "photos",
             "photo_request_status",
+            "photo_view_count",
+            "second_photo_request_status",
             "photo_requested_by_other_user",
             "photos_currently_visible",
             "wali_request_status",
@@ -479,6 +485,11 @@ class EmptyActionSerializer(serializers.Serializer):
     pass
 
 
+class PhotoRequestResponseSerializer(serializers.Serializer):
+    """Female/Wali accepts or rejects a second photo-view request."""
+    action = serializers.ChoiceField(choices=("accept", "reject", "accepted", "rejected"))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. SUBSCRIPTION USAGE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -515,6 +526,7 @@ class AdminMatchListSerializer(serializers.ModelSerializer):
             "id", "match_id", "status",
             "groom", "bride",
             "photos_revealed", "photos_revealed_count",
+            "photo_view_count", "second_photo_request_status",
             "total_matches", "in_discussion_count", "married_count", "dropped_count",
             "wali_request_status",
             "requested_at", "accepted_at", "married_at", "dropped_at",

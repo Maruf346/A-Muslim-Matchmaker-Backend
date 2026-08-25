@@ -765,6 +765,92 @@ class UnlockMatchView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @extend_schema(tags=["Matches - Photos"])
+class RequestSecondPhotoViewView(APIView):
+    """
+    POST — Male requests one extra 60-second photo-view window.
+    Available to: Male only (must be the match's male participant).
+    """
+    permission_classes = [IsMaleUser, IsParticipantInMatch]
+
+    @extend_schema(
+        summary="Request second photo view",
+        description=(
+            "Male can call this only once after the first photo-view window has "
+            "ended. Sets `second_photo_request_status=pending` and notifies the "
+            "female/wali user."
+        ),
+        request=EmptyActionSerializer,
+        responses={
+            200: MatchDetailSerializer,
+            400: OpenApiResponse(description="Already visible, already requested, or second view already used."),
+        },
+    )
+    def post(self, request, pk):
+        match = _get_match_or_404(pk, request.user)
+        if not match:
+            return Response({"error": "Match not found."}, status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, match)
+
+        try:
+            match = MatchService.request_second_photo_view(match, request.user)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            MatchDetailSerializer(match, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(tags=["Matches - Photos"])
+class RespondSecondPhotoRequestView(APIView):
+    """
+    POST — Female/Wali accepts or rejects the male user's second photo request.
+    """
+    permission_classes = [IsNormalUser, IsParticipantInMatch]
+
+    @extend_schema(
+        summary="Respond to second photo request",
+        description=(
+            "Female/Wali responds to the male user's one-time second photo-view "
+            "request. Body: `{ \"action\": \"accept\" }` or `{ \"action\": \"reject\" }`."
+            " Also accepts `accepted` / `rejected` for frontend convenience."
+        ),
+        request=PhotoRequestResponseSerializer,
+        responses={
+            200: MatchDetailSerializer,
+            400: OpenApiResponse(description="No pending request, invalid action, or wrong responder."),
+        },
+    )
+    def post(self, request, pk):
+        match = _get_match_or_404(pk, request.user)
+        if not match:
+            return Response({"error": "Match not found."}, status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, match)
+
+        payload = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        if "action" not in payload and request.query_params.get("action"):
+            payload["action"] = request.query_params.get("action")
+
+        serializer = PhotoRequestResponseSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            match = MatchService.respond_second_photo_request(
+                match,
+                request.user,
+                accepted=serializer.validated_data["action"] in ("accept", "accepted"),
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            MatchDetailSerializer(match, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(tags=["Matches - Photos"])
 class RequestPhotoViewView(APIView):
     """
     POST — Either party requests to view photos again (post mutual-interest).
@@ -777,8 +863,8 @@ class RequestPhotoViewView(APIView):
         description=(
             "Available after mutual interest. Sets `photo_request_status=requested`. "
             "The other party is notified and can approve or decline.\n\n"
-            "Note: backend supports unlimited requests — frontend should disable "
-            "the resend button while a request is pending."
+            "This route is kept for backward compatibility and now follows the "
+            "same one-time second-photo request rules."
         ),
         request=EmptyActionSerializer,
         responses={

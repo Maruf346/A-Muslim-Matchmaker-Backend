@@ -65,6 +65,13 @@ class PhotoRequestStatus(models.TextChoices):
     APPROVED   = "approved",   "Approved"
 
 
+class SecondPhotoRequestStatus(models.TextChoices):
+    NONE     = "none",     "None"
+    PENDING  = "pending",  "Pending"
+    ACCEPTED = "accepted", "Accepted"
+    REJECTED = "rejected", "Rejected"
+
+
 class WaliRequestStatus(models.TextChoices):
     NONE      = "none",      "None"
     REQUESTED = "requested", "Requested"
@@ -158,6 +165,16 @@ class Match(models.Model):
     photos_revealed_count = models.PositiveIntegerField(
         default=0,
         help_text="Total number of times photos have been revealed for this match.",
+    )
+    photo_view_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of female-photo viewing windows granted to the male user.",
+    )
+    second_photo_request_status = models.CharField(
+        max_length=20,
+        choices=SecondPhotoRequestStatus.choices,
+        default=SecondPhotoRequestStatus.NONE,
+        help_text="Tracks the one-time second female-photo viewing request.",
     )
     first_photos_revealed_at = models.DateTimeField(null=True, blank=True)
     last_photos_revealed_at  = models.DateTimeField(null=True, blank=True)
