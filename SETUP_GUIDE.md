@@ -141,3 +141,4 @@ Once you do have AWS, you'll need on the EC2 instance:
 Everything routes through Nginx on **8001** — that's the only port you need to remember for local development.
 
 
+ 
