@@ -216,6 +216,12 @@ class WaliLoginSerializer(_BaseLoginSerializer):
     blocked_message = "Please use the Male or Female login."
 
 
+class UserLoginSerializer(_BaseLoginSerializer):
+    """Unified login serializer for all user roles (Male, Female, Wali)."""
+    allowed_roles   = [UserRole.MALE, UserRole.FEMALE, UserRole.WALI]
+    blocked_message = "Account not found or not accessible."
+
+
 class AdminLoginInitiateSerializer(serializers.Serializer):
     """Step 1: email + password to kick off admin OTP login."""
     email    = serializers.EmailField()

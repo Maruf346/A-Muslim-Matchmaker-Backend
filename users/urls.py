@@ -82,6 +82,9 @@ router.register(r"admin/why-leavings", WhyLeavingViewSet, basename="admin-why-le
 router.register(r"admin/matchmakers",  MatchmakerViewSet,  basename="admin-matchmakers")
 
 urlpatterns = [
+    # ── Unified Login ─────────────────────────────────────────────────────────
+    path("login/",                  UserLoginView.as_view(),                name="user-login"),
+
     # ── Male ──────────────────────────────────────────────────────────────────
     path("male/register/initiate/", MaleInitiateRegistrationView.as_view(), name="male-register-initiate"),
     path("male/register/verify/",   MaleVerifyRegistrationView.as_view(),   name="male-register-verify"),

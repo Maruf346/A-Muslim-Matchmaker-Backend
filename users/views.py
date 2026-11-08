@@ -519,6 +519,29 @@ class WaliLoginView(APIView):
 
 
 @extend_schema(
+    tags=["Auth - General"],
+    summary="User — Unified Login (Male, Female, Wali)",
+    description="Authenticate any regular user (Male, Female, or Wali). Returns JWT access + refresh tokens without requiring role specification.",
+    request=UserLoginSerializer,
+    responses={
+        200: _token_response_schema,
+        400: OpenApiResponse(description="Invalid credentials or inactive account."),
+    },
+)
+class UserLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = UserLoginSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        return Response(
+            {"message": "Logged in successfully.", **_token_response(user, request)},
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
     tags=["Auth - Admin"],
     summary="Admin — Login Step 1: Submit credentials (Matchmaker & Superadmin)",
     description=(
