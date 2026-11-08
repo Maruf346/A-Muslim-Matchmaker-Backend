@@ -354,7 +354,7 @@ SPECTACULAR_SETTINGS = {
     ),
     'VERSION': '1.0.0',
     'TERMS_OF_SERVICE': '',
-    'CONTACT': {'email': 'support@amuslimmatrimony.com'},
+    'CONTACT': {'email': 'info@amuslimmatchmaker.com'},
     'LICENSE': {'name': 'Proprietary'},
     'SERVE_INCLUDE_SCHEMA': False,
     
@@ -490,7 +490,8 @@ EMAIL_PORT          = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS       = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER     = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL  = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@amuslimmatrimony.com')
+DEFAULT_FROM_EMAIL  = os.getenv('DEFAULT_FROM_EMAIL', 'info@amuslimmatchmaker.com')
+SUPPORT_EMAIL       = os.getenv('SUPPORT_EMAIL', 'info@amuslimmatchmaker.com')
 
 
 # OTP lifetimes (seconds)

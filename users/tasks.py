@@ -14,7 +14,7 @@ from django.core.mail import send_mail
 logger = logging.getLogger(__name__)
 
 PLATFORM_NAME = "A Muslim Matchmaker"
-SUPPORT_EMAIL = getattr(settings, "SUPPORT_EMAIL", "support@amuslimmatrimony.com")
+SUPPORT_EMAIL = getattr(settings, "SUPPORT_EMAIL", "info@amuslimmatchmaker.com")
 
 
 @shared_task(bind=True, max_retries=3, name="users.send_registration_otp_email")

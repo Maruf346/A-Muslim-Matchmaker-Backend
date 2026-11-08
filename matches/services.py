@@ -155,7 +155,10 @@ class MatchService:
             ValueError if a match already exists between these two users,
             or if the male user has hit their subscription limit.
         """
-        if Match.objects.filter(male_user=male_user, other_user=target_user).exists():
+        existing = Match.objects.filter(male_user=male_user, other_user=target_user).first()
+        if existing:
+            if existing.status in [MatchStatus.DECLINED, MatchStatus.CANCELLED]:
+                return MatchService.resend_request(male_user, target_user)
             raise ValueError("A connection already exists with this user.")
 
         allowed, reason = SubscriptionLimitService.can_send_request(male_user)
@@ -245,7 +248,8 @@ class MatchService:
     def cancel_pending_request(match: Match, requester) -> Match:
         """
         Male cancels their own PENDING (not yet responded) request.
-        This is a hard delete since no mutual interest was ever established.
+        Instead of hard delete, transitions to CANCELLED status so the request
+        remains counted against the user's free or plan limit.
         """
         if match.status != MatchStatus.PENDING:
             raise ValueError("Only pending requests can be cancelled this way.")
@@ -253,7 +257,10 @@ class MatchService:
             raise ValueError("Only the sender can cancel a pending request.")
 
         other_user = match.other_user
-        match.delete()
+        match.status = MatchStatus.CANCELLED
+        match.cancelled_by = requester
+        match.cancelled_at = timezone.now()
+        match.save(update_fields=["status", "cancelled_by", "cancelled_at", "updated_at"])
 
         try:
             NotificationTemplates.connection_request_cancelled(
@@ -262,7 +269,7 @@ class MatchService:
         except Exception:
             logger.exception("connection_request_cancelled notification failed.")
 
-        return None
+        return match
 
     @staticmethod
     def resend_request(male_user, target_user) -> Match:
@@ -280,7 +287,7 @@ class MatchService:
         if existing is None:
             return MatchService.send_connection_request(male_user, target_user)
 
-        if existing.status == MatchStatus.DECLINED:
+        if existing.status in [MatchStatus.DECLINED, MatchStatus.CANCELLED]:
             allowed, reason = SubscriptionLimitService.can_send_request(male_user)
             if not allowed:
                 raise ValueError(reason)
