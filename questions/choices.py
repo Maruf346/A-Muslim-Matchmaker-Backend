@@ -32,7 +32,8 @@ HOW_FOUND_CHOICES = [
 
 SECT_CHOICES = [
     ("sunni",  "Sunni"),
-    ("salafi", "Salafi"),
+    ("salafi", "Sunni/Salafi"),
+    ("other",  "Other Sect"),
 ]
 
 

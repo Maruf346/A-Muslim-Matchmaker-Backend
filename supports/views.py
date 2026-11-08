@@ -90,7 +90,7 @@ class FAQViewSet(viewsets.ModelViewSet):
     description="Retrieve the About Us information for public or authenticated users."
 )
 class AboutUsPublicView(RetrieveAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     serializer_class = AboutUsSerializer
     
     def get_object(self):
@@ -121,7 +121,7 @@ class AboutUsAdminUpdateView(UpdateAPIView):
     description="Retrieve the Terms and Conditions content for public or authenticated users."
 )
 class TermsAndConditionsPublicView(RetrieveAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     serializer_class = TermsAndConditionsSerializer
     
     def get_object(self):
@@ -153,7 +153,7 @@ class TermsAndConditionsAdminUpdateView(UpdateAPIView):
     description="Retrieve the Privacy Policy content for public or authenticated users."
 )
 class PrivacyPolicyPublicView(RetrieveAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     serializer_class = PrivacyPolicySerializer
     
     def get_object(self):
