@@ -17,6 +17,8 @@
 
 # Shared config for all Django-based services
 x-django-base: &django-base
+  # Django, Celery worker, and Celery beat share one application image.
+  image: amm-backend-app:latest
   build:
     context: .
     dockerfile: Dockerfile
