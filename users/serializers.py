@@ -49,6 +49,7 @@ def _build_token_data(user) -> dict:
             "email":            user.email,
             "role":             user.role,
             "subscription_plan": user.subscription_plan,
+            "is_verified":      user.is_verified,
             "profile_picture":  user.profile_picture.url if user.profile_picture else None,
             "is_private_matchmaking_client":  user.is_private_matchmaking_client,
         },
@@ -534,6 +535,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "subscription_end",
             "provider",
             "is_active",
+            "is_verified",
             "is_private_matchmaking_client",
             "last_active",
             "last_active_display",
@@ -544,7 +546,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "codename", "email", "role", "gender",
             "subscription_plan", "subscription_start", "subscription_end",
-            "provider", "is_active", "is_private_matchmaking_client", "last_active", "last_active_display",
+            "provider", "is_active", "is_verified", "is_private_matchmaking_client", "last_active", "last_active_display",
             "profile_completion_percentage",
             "created_at", "updated_at",
         ]

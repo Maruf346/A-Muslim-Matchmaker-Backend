@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from users.models import Gender, User, UserRole
+from users.serializers import _build_token_data
 
 
 @override_settings(
@@ -52,3 +53,17 @@ class UserProfileCompletionTests(APITestCase):
             response.data["profile_completion_percentage"],
             self.user.male_basic_info.completion_percentage,
         )
+
+    def test_user_profile_and_token_include_is_verified(self):
+        initial_response = self.client.get(self.url)
+        self.assertEqual(initial_response.status_code, status.HTTP_200_OK)
+        self.assertIs(initial_response.data["is_verified"], False)
+        self.assertIs(_build_token_data(self.user)["user"]["is_verified"], False)
+
+        self.user.is_verified = True
+        self.user.save(update_fields=["is_verified"])
+
+        verified_response = self.client.get(self.url)
+        self.assertEqual(verified_response.status_code, status.HTTP_200_OK)
+        self.assertIs(verified_response.data["is_verified"], True)
+        self.assertIs(_build_token_data(self.user)["user"]["is_verified"], True)
