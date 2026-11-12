@@ -356,10 +356,6 @@ class MatchedProfileSerializer(serializers.Serializer):
 
     def get_photo_blurred(self, obj) -> bool:
         match = self._match()
-        request = self.context.get("request")
-        viewer = request.user if request else None
-        if viewer and viewer != match.male_user and obj == match.male_user and match.is_mutual:
-            return False
         return not match.photos_currently_visible
 
     def get_photos(self, obj) -> list:
