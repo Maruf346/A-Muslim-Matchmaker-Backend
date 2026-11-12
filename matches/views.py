@@ -363,16 +363,17 @@ class DirectoryProfileDetailView(APIView):
 @extend_schema(tags=["Matches - Requests"])
 class SendConnectionRequestView(APIView):
     """
-    POST — Male sends a connection request to a Female/Wali.
-    Available to: Male only. Subject to subscription limits.
+    POST — Send a connection request to an opposite-side profile.
+    Available to: Male, Female, Wali. Subject to subscription limits.
     """
-    permission_classes = [IsMaleUser, CanSendConnectionRequest]
+    permission_classes = [IsNormalUser, CanSendConnectionRequest]
 
     @extend_schema(
         summary="Send a connection request",
         description=(
-            "Male sends a connection request to a Female or Wali profile by `target_user_id`.\n\n"
-            "**Subscription rules:**\n"
+            "Sends a connection request to an opposite-side profile by `target_user_id` "
+            "(Male → Female/Wali, or Female/Wali → Male).\n\n"
+            "**Subscription rules (same for all roles):**\n"
             "- Free: limited to 2 requests total\n"
             "- Monthly: limited to 10 requests per billing cycle (anniversary-based)\n"
             "- Annual: unlimited\n\n"
@@ -404,11 +405,11 @@ class SendConnectionRequestView(APIView):
 @extend_schema(tags=["Matches - Requests"])
 class SentRequestsListView(APIView):
     """
-    GET — List connection requests sent by the authenticated Male user
+    GET — List connection requests initiated by the authenticated user
     that are still PENDING.
-    Available to: Male only.
+    Available to: Male, Female, Wali.
     """
-    permission_classes = [IsMaleUser]
+    permission_classes = [IsNormalUser]
 
     @extend_schema(
         summary="List my sent (pending) requests",
@@ -416,8 +417,9 @@ class SentRequestsListView(APIView):
     )
     def get(self, request):
         qs = Match.objects.filter(
-            male_user=request.user,
+            initiated_by=request.user,
             status=MatchStatus.PENDING,
+            male_user__is_active=True,
             other_user__is_active=True,
         )
         return Response(
@@ -429,31 +431,26 @@ class SentRequestsListView(APIView):
 @extend_schema(tags=["Matches - Requests"])
 class ReceivedRequestsListView(APIView):
     """
-    GET — List connection requests received by the authenticated
-    Female/Wali user that are still PENDING.
-    Available to: Female, Wali only.
+    GET — List connection requests received by the authenticated user
+    that are still PENDING.
+    Available to: Male, Female, Wali.
     """
     permission_classes = [IsNormalUser]
 
     @extend_schema(
         summary="List my received (pending) requests",
-        description="Available to Female and Wali users only.",
+        description="Available to Male, Female, and Wali users.",
         responses={
             200: ConnectionRequestListSerializer(many=True),
-            403: OpenApiResponse(description="Male users do not receive connection requests."),
         },
     )
     def get(self, request):
-        if request.user.role == UserRole.MALE:
-            return Response(
-                {"error": "Male users do not receive connection requests."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         qs = Match.objects.filter(
-            other_user=request.user,
+            (Q(male_user=request.user) | Q(other_user=request.user)),
             status=MatchStatus.PENDING,
             male_user__is_active=True,
-        )
+            other_user__is_active=True,
+        ).exclude(initiated_by=request.user)
         return Response(
             ConnectionRequestListSerializer(qs, many=True, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -463,8 +460,8 @@ class ReceivedRequestsListView(APIView):
 @extend_schema(tags=["Matches - Requests"])
 class RespondToRequestView(APIView):
     """
-    PATCH — Female/Wali accepts or declines a pending connection request.
-    Available to: Female, Wali only (must be the receiver).
+    PATCH — Receiver accepts or declines a pending connection request.
+    Available to: Male, Female, Wali (must be the receiver).
     """
     permission_classes = [IsNormalUser, IsParticipantInMatch]
 
@@ -513,10 +510,10 @@ class RespondToRequestView(APIView):
 @extend_schema(tags=["Matches - Requests"])
 class CancelPendingRequestView(APIView):
     """
-    DELETE — Male cancels their own PENDING request (hard delete).
-    Available to: Male only (must be the sender).
+    DELETE — Sender cancels their own PENDING request.
+    Available to: Male, Female, Wali (must be the sender).
     """
-    permission_classes = [IsMaleUser, IsParticipantInMatch]
+    permission_classes = [IsNormalUser, IsParticipantInMatch]
 
     @extend_schema(
         summary="Cancel a pending request (before any response)",
@@ -543,10 +540,10 @@ class CancelPendingRequestView(APIView):
 @extend_schema(tags=["Matches - Requests"])
 class ResendRequestView(APIView):
     """
-    POST — Male resends a connection request after a previous DECLINE.
-    Available to: Male only.
+    POST — Sender resends a connection request after a previous DECLINE/CANCEL.
+    Available to: Male, Female, Wali.
     """
-    permission_classes = [IsMaleUser, CanSendConnectionRequest]
+    permission_classes = [IsNormalUser, CanSendConnectionRequest]
 
     @extend_schema(
         summary="Resend a connection request after decline",
@@ -1091,9 +1088,9 @@ class ConnectionUsageView(APIView):
     """
     GET — Returns the authenticated user's connection request usage
     for the current plan window.
-    Available to: Male only (only Male sends requests).
+    Available to: Male, Female, Wali.
     """
-    permission_classes = [IsMaleUser]
+    permission_classes = [IsNormalUser]
 
     @extend_schema(
         summary="Get my connection request usage",

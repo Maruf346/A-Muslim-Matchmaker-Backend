@@ -236,7 +236,7 @@ class DirectoryProfileDetailSerializer(serializers.Serializer):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SendConnectionRequestSerializer(serializers.Serializer):
-    """Male sends a connection request to a Female/Wali by their User UUID."""
+    """Send a connection request to an opposite-side user by their User UUID."""
     target_user_id = serializers.UUIDField()
 
     def validate_target_user_id(self, value):
@@ -247,20 +247,27 @@ class SendConnectionRequestSerializer(serializers.Serializer):
         except User.DoesNotExist:
             raise serializers.ValidationError("Target user not found.")
 
-        if target.role not in (UserRole.FEMALE, UserRole.WALI):
-            raise serializers.ValidationError("Connection requests can only be sent to Female or Wali profiles.")
+        if not target.is_active:
+            raise serializers.ValidationError("Target user not found.")
 
-        if target.is_private_matchmaking_client: 
-            raise ValidationError("Not available.")
-        
+        if target.is_private_matchmaking_client:
+            raise serializers.ValidationError("Not available.")
+
         request = self.context.get("request")
         if request and target == request.user:
             raise serializers.ValidationError("You cannot send a connection request to yourself.")
 
         if request:
+            sender_role = request.user.role
+            if sender_role == UserRole.MALE and target.role not in (UserRole.FEMALE, UserRole.WALI):
+                raise serializers.ValidationError("Male users can only send connection requests to Female or Wali profiles.")
+            if sender_role in (UserRole.FEMALE, UserRole.WALI) and target.role != UserRole.MALE:
+                raise serializers.ValidationError("Female and Wali users can only send connection requests to Male profiles.")
             from wishlists.services import VisibilityService
             if not VisibilityService.can_view_profile(request.user, target):
                 raise serializers.ValidationError("Target user not found.")
+        elif target.role not in (UserRole.MALE, UserRole.FEMALE, UserRole.WALI):
+            raise serializers.ValidationError("Target profile is not available for connection requests.")
 
         return value
 
@@ -349,6 +356,10 @@ class MatchedProfileSerializer(serializers.Serializer):
 
     def get_photo_blurred(self, obj) -> bool:
         match = self._match()
+        request = self.context.get("request")
+        viewer = request.user if request else None
+        if viewer and viewer != match.male_user and obj == match.male_user and match.is_mutual:
+            return False
         return not match.photos_currently_visible
 
     def get_photos(self, obj) -> list:

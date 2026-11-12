@@ -394,8 +394,8 @@ class NotificationTemplates:
         return NotificationService.send(
             user=receiver,
             notification_type=NotificationType.UNLOCK_REQUEST_RECEIVED,
-            title="Connection Unlock Requested",
-            body=f"{requester.codename} has requested to unlock and end the current connection.",
+            title="Wali Stage Ended & Profiles Unlocked",
+            body=f"{requester.codename} has ended the Wali stage and dropped the connection. Both profiles are now unlocked.",
             data={
                 "requester_codename": requester.codename,
                 "requester_id": str(requester.id),

@@ -5,7 +5,8 @@ from datetime import date
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
-from matches.models import Match, MatchStatus
+from matches.models import Match, MatchStatus, WaliRequestStatus
+from notifications.models import Notification
 from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
@@ -431,3 +432,105 @@ class AdminMatchPaginationTests(APITestCase):
         self.assertIn("previous", response.data)
         self.assertIn("results", response.data)
         self.assertEqual(len(response.data["results"]), 2)
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests",
+        }
+    }
+)
+class BidirectionalRequestAndUnlockTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.brother = User.objects.create_user(
+            email="bidi-brother@example.com",
+            password="testpass123",
+            first_name="Brother",
+            last_name="One",
+            role=UserRole.MALE,
+            gender=Gender.MALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+        self.sister = User.objects.create_user(
+            email="bidi-sister@example.com",
+            password="testpass123",
+            first_name="Sister",
+            last_name="One",
+            role=UserRole.FEMALE,
+            gender=Gender.FEMALE,
+            subscription_plan="free",
+            is_active=True,
+        )
+        self.other_brother = User.objects.create_user(
+            email="bidi-brother-2@example.com",
+            password="testpass123",
+            first_name="Brother",
+            last_name="Two",
+            role=UserRole.MALE,
+            gender=Gender.MALE,
+            subscription_plan="monthly",
+            is_active=True,
+        )
+
+    def test_sister_can_send_interest_and_brother_can_receive_and_accept(self):
+        self.client.force_authenticate(user=self.sister)
+        send_res = self.client.post(
+            reverse("request-send"),
+            {"target_user_id": str(self.brother.id)},
+            format="json",
+        )
+        self.assertEqual(send_res.status_code, status.HTTP_201_CREATED)
+
+        usage_res = self.client.get(reverse("connection-usage"))
+        self.assertEqual(usage_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(usage_res.data["requests_sent"], 1)
+        self.assertEqual(usage_res.data["requests_remaining"], 1)
+
+        sent_res = self.client.get(reverse("request-sent"))
+        self.assertEqual(sent_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(sent_res.data), 1)
+        match_pk = sent_res.data[0]["id"]
+
+        self.client.force_authenticate(user=self.brother)
+        recv_res = self.client.get(reverse("request-received"))
+        self.assertEqual(recv_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(recv_res.data), 1)
+
+        accept_res = self.client.patch(f"{reverse('request-respond', kwargs={'pk': match_pk})}?action=accept")
+        self.assertEqual(accept_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(accept_res.data["status"], MatchStatus.ACCEPTED)
+
+    def test_unlock_drops_match_resets_wali_status_notifies_other_and_unlocks_profiles(self):
+        match = Match.objects.create(
+            male_user=self.brother,
+            other_user=self.sister,
+            initiated_by=self.brother,
+            status=MatchStatus.IN_DISCUSSION,
+            wali_request_status=WaliRequestStatus.ACCEPTED,
+            match_id="MT-UNLOCK-1",
+        )
+
+        self.client.force_authenticate(user=self.brother)
+        unlock_res = self.client.post(reverse("match-unlock", kwargs={"pk": match.id}), {}, format="json")
+        self.assertEqual(unlock_res.status_code, status.HTTP_200_OK)
+
+        match.refresh_from_db()
+        self.assertEqual(match.status, MatchStatus.DROPPED)
+        self.assertEqual(match.wali_request_status, WaliRequestStatus.NONE)
+        self.assertFalse(match.wali_details_visible)
+
+        notif = Notification.objects.filter(user=self.sister).order_by("-created_at").first()
+        self.assertIsNotNone(notif)
+        self.assertEqual(notif.title, "Wali Stage Ended & Profiles Unlocked")
+
+        self.client.force_authenticate(user=self.sister)
+        new_req = self.client.post(
+            reverse("request-send"),
+            {"target_user_id": str(self.other_brother.id)},
+            format="json",
+        )
+        self.assertEqual(new_req.status_code, status.HTTP_201_CREATED)

@@ -16,6 +16,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from notifications.services import NotificationTemplates
+from users.models import UserRole
 
 from .models import *
 
@@ -181,37 +182,47 @@ class MatchService:
     # ── Connection requests ───────────────────────────────────────────────────
 
     @staticmethod
-    def send_connection_request(male_user, target_user) -> Match:
+    def _resolve_pair(sender, target_user):
+        """Return (male_user, other_user) for a valid Brother <-> Sister/Wali pair."""
+        if sender.role == UserRole.MALE and target_user.role in (UserRole.FEMALE, UserRole.WALI):
+            return sender, target_user
+        if sender.role in (UserRole.FEMALE, UserRole.WALI) and target_user.role == UserRole.MALE:
+            return target_user, sender
+        raise ValueError("Connection requests can only be sent between Brother and Sister/Wali profiles.")
+
+    @staticmethod
+    def send_connection_request(sender, target_user) -> Match:
         """
-        Male sends a connection request to a Female or Wali.
+        Either Brother or Sister/Wali sends a connection request to an opposite-side profile.
 
         Raises:
             ValueError if a match already exists between these two users,
             if either user is locked in an active Wali discussion,
-            or if the male user has hit their subscription limit.
+            or if the sender has hit their subscription limit.
         """
-        MatchService._assert_users_unlocked(male_user, target_user)
+        male_user, other_user = MatchService._resolve_pair(sender, target_user)
+        MatchService._assert_users_unlocked(sender, target_user)
 
-        existing = Match.objects.filter(male_user=male_user, other_user=target_user).first()
+        existing = Match.objects.filter(male_user=male_user, other_user=other_user).first()
         if existing:
             if existing.status in [MatchStatus.DECLINED, MatchStatus.CANCELLED]:
-                return MatchService.resend_request(male_user, target_user)
+                return MatchService.resend_request(sender, target_user)
             raise ValueError("A connection already exists with this user.")
 
-        allowed, reason = SubscriptionLimitService.can_send_request(male_user)
+        allowed, reason = SubscriptionLimitService.can_send_request(sender)
         if not allowed:
             raise ValueError(reason)
 
         match = Match.objects.create(
             male_user=male_user,
-            other_user=target_user,
-            initiated_by=male_user,
+            other_user=other_user,
+            initiated_by=sender,
             status=MatchStatus.PENDING,
         )
 
         try:
             NotificationTemplates.connection_request_received(
-                receiver=target_user, sender=male_user
+                receiver=target_user, sender=sender
             )
         except Exception:
             logger.exception("connection_request_received notification failed for match %s", match.id)
@@ -221,14 +232,15 @@ class MatchService:
     @staticmethod
     def accept_connection_request(match: Match, responder) -> Match:
         """
-        Female/Wali accepts a pending connection request.
+        Receiver (Female/Wali or Male, depending on who initiated) accepts a pending request.
         Transitions PENDING → ACCEPTED. Assigns match_id.
         """
         if match.status != MatchStatus.PENDING:
             raise ValueError(f"Cannot accept a match with status '{match.status}'.")
-        if responder != match.other_user:
+        expected_receiver = match.other_party(match.initiated_by)
+        if responder != expected_receiver:
             raise ValueError("Only the receiver can accept this request.")
-        MatchService._assert_users_unlocked(responder, match.male_user, exclude_match_id=match.id)
+        MatchService._assert_users_unlocked(responder, match.initiated_by, exclude_match_id=match.id)
 
         now = timezone.now()
         match.status       = MatchStatus.ACCEPTED
@@ -252,7 +264,7 @@ class MatchService:
 
         try:
             NotificationTemplates.connection_request_accepted(
-                sender=match.male_user, receiver=match.other_user
+                sender=match.initiated_by, receiver=responder
             )
             NotificationTemplates.match_created(
                 user=match.male_user,
@@ -271,10 +283,11 @@ class MatchService:
 
     @staticmethod
     def decline_connection_request(match: Match, responder) -> Match:
-        """Female/Wali declines a pending connection request."""
+        """Receiver declines a pending connection request."""
         if match.status != MatchStatus.PENDING:
             raise ValueError(f"Cannot decline a match with status '{match.status}'.")
-        if responder != match.other_user:
+        expected_receiver = match.other_party(match.initiated_by)
+        if responder != expected_receiver:
             raise ValueError("Only the receiver can decline this request.")
 
         match.status       = MatchStatus.DECLINED
@@ -283,7 +296,7 @@ class MatchService:
 
         try:
             NotificationTemplates.connection_request_declined(
-                sender=match.male_user, receiver=match.other_user
+                sender=match.initiated_by, receiver=responder
             )
         except Exception:
             logger.exception("connection_request_declined notification failed for match %s", match.id)
@@ -293,16 +306,16 @@ class MatchService:
     @staticmethod
     def cancel_pending_request(match: Match, requester) -> Match:
         """
-        Male cancels their own PENDING (not yet responded) request.
+        Sender cancels their own PENDING (not yet responded) request.
         Instead of hard delete, transitions to CANCELLED status so the request
         remains counted against the user's free or plan limit.
         """
         if match.status != MatchStatus.PENDING:
             raise ValueError("Only pending requests can be cancelled this way.")
-        if requester != match.male_user:
+        if requester != match.initiated_by:
             raise ValueError("Only the sender can cancel a pending request.")
 
-        other_user = match.other_user
+        other_user = match.other_party(requester)
         match.status = MatchStatus.CANCELLED
         match.cancelled_by = requester
         match.cancelled_at = timezone.now()
@@ -318,36 +331,39 @@ class MatchService:
         return match
 
     @staticmethod
-    def resend_request(male_user, target_user) -> Match:
+    def resend_request(sender, target_user) -> Match:
         """
-        Male sends a new connection request after a previous one was
-        DECLINED or the previous match record is gone (CANCELLED was
-        a hard-delete in the old flow — but for ACCEPTED→CANCELLED
-        matches, see resend_after_cancel).
-
-        Only allowed if no existing match row exists, or the existing
-        row has status DECLINED (in which case it's reset to PENDING).
+        Sender sends a new connection request after a previous DECLINE or CANCELLED status.
+        Only allowed if no existing match row exists, or the existing row has status
+        DECLINED / CANCELLED (in which case it's reset to PENDING).
         """
-        MatchService._assert_users_unlocked(male_user, target_user)
+        male_user, other_user = MatchService._resolve_pair(sender, target_user)
+        MatchService._assert_users_unlocked(sender, target_user)
 
-        existing = Match.objects.filter(male_user=male_user, other_user=target_user).first()
+        existing = Match.objects.filter(male_user=male_user, other_user=other_user).first()
 
         if existing is None:
-            return MatchService.send_connection_request(male_user, target_user)
+            return MatchService.send_connection_request(sender, target_user)
 
         if existing.status in [MatchStatus.DECLINED, MatchStatus.CANCELLED]:
-            allowed, reason = SubscriptionLimitService.can_send_request(male_user)
+            allowed, reason = SubscriptionLimitService.can_send_request(sender)
             if not allowed:
                 raise ValueError(reason)
 
+            existing.initiated_by = sender
             existing.status       = MatchStatus.PENDING
             existing.responded_at = None
+            existing.cancelled_by = None
+            existing.cancelled_at = None
             existing.requested_at = timezone.now()
-            existing.save(update_fields=["status", "responded_at", "requested_at", "updated_at"])
+            existing.save(update_fields=[
+                "initiated_by", "status", "responded_at",
+                "cancelled_by", "cancelled_at", "requested_at", "updated_at",
+            ])
 
             try:
                 NotificationTemplates.connection_request_received(
-                    receiver=target_user, sender=male_user
+                    receiver=target_user, sender=sender
                 )
             except Exception:
                 logger.exception("Resend notification failed for match %s", existing.id)
@@ -732,17 +748,20 @@ class MatchService:
         user" — so this is an immediate action with notification, not a
         two-step approval.
         """
-        if match.status != MatchStatus.IN_DISCUSSION:
+        if match.status not in MatchService.LOCKED_MATCH_STATUSES:
             raise ValueError(
-                f"Unlock is only available from 'in_discussion' status. Current status: '{match.status}'."
+                f"Unlock is only available from an active Wali discussion. Current status: '{match.status}'."
             )
         if requester not in (match.male_user, match.other_user):
             raise ValueError("You are not a participant in this match.")
 
-        match.status     = MatchStatus.DROPPED
-        match.dropped_by = requester
-        match.dropped_at = timezone.now()
-        match.save(update_fields=["status", "dropped_by", "dropped_at", "updated_at"])
+        match.status              = MatchStatus.DROPPED
+        match.dropped_by          = requester
+        match.dropped_at          = timezone.now()
+        match.wali_request_status = WaliRequestStatus.NONE
+        match.save(update_fields=[
+            "status", "dropped_by", "dropped_at", "wali_request_status", "updated_at",
+        ])
 
         other_party = match.other_party(requester)
         try:

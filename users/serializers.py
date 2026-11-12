@@ -734,6 +734,8 @@ class AdminUserListSerializer(serializers.ModelSerializer):
     Used in admin dashboard to list/search/filter all users.
     """
     last_active_display = serializers.SerializerMethodField()
+    profile_picture = serializers.SerializerMethodField()
+    photos = serializers.SerializerMethodField()
     date_of_birth = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     sect = serializers.SerializerMethodField()
@@ -754,6 +756,8 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             "email",
             "role",
             "gender",
+            "profile_picture",
+            "photos",
             "subscription_plan",
             "is_verified",
             "date_of_birth",
@@ -856,6 +860,30 @@ class AdminUserListSerializer(serializers.ModelSerializer):
     def get_profile_completion_percentage(self, obj):
         info = self._get_basic_info(obj)
         return getattr(info, "completion_percentage", None) if info else None
+
+    def _build_file_url(self, file_field) -> str | None:
+        if not file_field:
+            return None
+        try:
+            url = file_field.url
+        except Exception:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
+    def get_profile_picture(self, obj) -> str | None:
+        direct_url = self._build_file_url(getattr(obj, "profile_picture", None))
+        if direct_url:
+            return direct_url
+        from questions.models import UserPhoto
+        primary_photo = UserPhoto.objects.filter(user=obj).order_by("order", "created_at").first()
+        return self._build_file_url(getattr(primary_photo, "image", None)) if primary_photo else None
+
+    def get_photos(self, obj) -> list:
+        from questions.models import UserPhoto
+        from questions.serializers import UserPhotoSerializer
+        photos = UserPhoto.objects.filter(user=obj).order_by("order", "created_at")
+        return UserPhotoSerializer(photos, many=True, context=self.context).data
 
 
 class AdminBlockUserSerializer(serializers.Serializer):
