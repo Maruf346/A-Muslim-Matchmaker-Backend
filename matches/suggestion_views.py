@@ -20,11 +20,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.utils import format_last_active_display
 from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
 from questions.serializers import UserPhotoSerializer
 from users.models import UserRole
 from users.permissions import IsNormalUser
 
+from .services import MatchService
 from .suggestions import get_suggested_matches, _get_info
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,8 @@ def _serialize_suggestion(user_obj, info, score: int, request) -> dict:
         "role":                 user_obj.role,
         "gender":               user_obj.gender,
         "subscription_plan":    user_obj.subscription_plan,
+        "is_verified":          user_obj.is_verified,
+        "is_profile_locked":    MatchService.is_user_locked(user_obj),
         "last_active":          user_obj.last_active,
         "last_active_display":  _last_active_display(user_obj),
         "match_score":          score,
@@ -72,18 +76,7 @@ def _serialize_suggestion(user_obj, info, score: int, request) -> dict:
 
 
 def _last_active_display(user) -> str | None:
-    if not user.last_active:
-        return None
-    from django.utils import timezone
-    delta   = timezone.now() - user.last_active
-    seconds = int(delta.total_seconds())
-    if seconds < 60:
-        return "Active now"
-    if seconds < 3600:
-        return f"Active {seconds // 60} min(s) ago"
-    if seconds < 86400:
-        return f"Active {seconds // 3600} hr(s) ago"
-    return f"Active {seconds // 86400} day(s) ago"
+    return format_last_active_display(user)
 
 
 SuggestionCardSchema = inline_serializer(
@@ -94,6 +87,8 @@ SuggestionCardSchema = inline_serializer(
         "role":                  drf_serializers.CharField(),
         "gender":                drf_serializers.CharField(allow_null=True),
         "subscription_plan":     drf_serializers.CharField(),
+        "is_verified":           drf_serializers.BooleanField(),
+        "is_profile_locked":     drf_serializers.BooleanField(),
         "last_active":           drf_serializers.DateTimeField(allow_null=True),
         "last_active_display":   drf_serializers.CharField(allow_null=True),
         "match_score":           drf_serializers.IntegerField(),

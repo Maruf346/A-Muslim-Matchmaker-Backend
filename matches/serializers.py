@@ -14,6 +14,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_field
 
+from core.utils import format_last_active_display
 from questions.models import FemaleBasicInfo, MaleBasicInfo, UserPhoto, WaliBasicInfo
 from questions.serializers import (
     FemaleBasicInfoSerializer,
@@ -24,7 +25,7 @@ from questions.serializers import (
 from users.models import UserRole
 
 from .models import *
-from .services import SubscriptionLimitService
+from .services import MatchService, SubscriptionLimitService
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,18 +33,7 @@ from .services import SubscriptionLimitService
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _last_active_display(user) -> str | None:
-    if not user.last_active:
-        return None
-    from django.utils import timezone
-    delta   = timezone.now() - user.last_active
-    seconds = int(delta.total_seconds())
-    if seconds < 60:
-        return "Active now"
-    if seconds < 3600:
-        return f"Active {seconds // 60} min(s) ago"
-    if seconds < 86400:
-        return f"Active {seconds // 3600} hr(s) ago"
-    return f"Active {seconds // 86400} day(s) ago"
+    return format_last_active_display(user)
 
 
 def _get_basic_info(user):
@@ -120,6 +110,7 @@ class AdminMatchProfileSerializer(serializers.Serializer):
     gender = serializers.CharField(allow_null=True, required=False)
     phone = serializers.CharField(allow_null=True, required=False)
     profile_picture = serializers.CharField(allow_null=True, required=False)
+    is_verified = serializers.BooleanField(default=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +133,8 @@ class DirectoryProfileSerializer(serializers.Serializer):
     role                  = serializers.CharField()
     gender                = serializers.CharField()
     subscription_plan     = serializers.CharField()
+    is_verified           = serializers.BooleanField()
+    is_profile_locked     = serializers.SerializerMethodField()
     last_active           = serializers.DateTimeField(allow_null=True)
     last_active_display   = serializers.SerializerMethodField()
     completion_percentage = serializers.SerializerMethodField()
@@ -154,6 +147,9 @@ class DirectoryProfileSerializer(serializers.Serializer):
     photos                = serializers.SerializerMethodField()
     has_boosted_profile   = serializers.BooleanField()
     photo_blurred         = serializers.SerializerMethodField()
+
+    def get_is_profile_locked(self, obj) -> bool:
+        return MatchService.is_user_locked(obj)
 
     def get_last_active_display(self, obj) -> str | None:
         return _last_active_display(obj)
@@ -309,6 +305,9 @@ class MatchedProfileSerializer(serializers.Serializer):
     display_name          = serializers.SerializerMethodField()
     role                  = serializers.CharField()
     gender                = serializers.CharField()
+    is_verified           = serializers.BooleanField()
+    is_profile_locked     = serializers.SerializerMethodField()
+    last_active           = serializers.DateTimeField(allow_null=True)
     last_active_display   = serializers.SerializerMethodField()
     completion_percentage = serializers.SerializerMethodField()
     age                   = serializers.SerializerMethodField()
@@ -321,6 +320,9 @@ class MatchedProfileSerializer(serializers.Serializer):
 
     def _match(self) -> Match:
         return self.context["match"]
+
+    def get_is_profile_locked(self, obj) -> bool:
+        return MatchService.is_user_locked(obj)
 
     def get_display_name(self, obj) -> str:
         match = self._match()
@@ -387,12 +389,11 @@ class MatchedProfileSerializer(serializers.Serializer):
         elif obj.role == UserRole.WALI:
             from questions.models import WaliProfile
             wali_profile = WaliProfile.objects.filter(user=obj).first()
-            if wali_profile:
-                return {
-                    "wali_name":     obj.full_name,
-                    "wali_relation": wali_profile.relation_to_sister,
-                    "wali_number":   wali_profile.phone,
-                }
+            return {
+                "wali_name":     obj.full_name or None,
+                "wali_relation": wali_profile.relation_to_sister if wali_profile else None,
+                "wali_number":   wali_profile.phone if wali_profile else None,
+            }
         return None
 
 
@@ -546,6 +547,7 @@ class AdminMatchListSerializer(serializers.ModelSerializer):
             "gender":     user.gender,
             "phone":      getattr(info, "phone", None) if info else None,
             "profile_picture": _get_primary_photo_url(user, request),
+            "is_verified": user.is_verified,
         }
 
     @extend_schema_field(AdminMatchProfileSerializer)

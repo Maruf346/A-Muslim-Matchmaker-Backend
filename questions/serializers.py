@@ -140,7 +140,7 @@ class MaleBasicInfoSerializer(serializers.ModelSerializer):
             "relationship_with_islam", "role_as_spouse", "about_yourself",
             "envision_spouse", "envision_marriage",
             "spouse_religious_status_pref", "open_to_relocate_details",
-            "health_concerns", "other_preferences",
+            "other_preferences",
             # computed
             "completion_percentage", "age",
             # photos (read-only, managed via /photos/ endpoint)
@@ -235,7 +235,7 @@ class FemaleBasicInfoSerializer(serializers.ModelSerializer):
             "relationship_with_islam", "role_as_spouse", "about_yourself",
             "envision_spouse", "envision_marriage",
             "spouse_religious_status_pref", "open_to_relocate_details",
-            "health_concerns", "other_preferences",
+            "other_preferences",
             # computed
             "completion_percentage", "age",
             "photos",
@@ -300,23 +300,66 @@ class WaliProfileSerializer(serializers.ModelSerializer):
     """
 
     completion_percentage = serializers.SerializerMethodField(read_only=True)
+    first_name            = serializers.CharField(source="user.first_name", required=False, allow_blank=True)
+    last_name             = serializers.CharField(source="user.last_name", required=False, allow_blank=True)
+    wali_name             = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
 
     class Meta:
         model  = WaliProfile
         fields = [
             "id",
+            "first_name", "last_name", "wali_name",
             "how_found", "gender", "relation_to_sister", "phone",
             "completion_percentage",
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "completion_percentage", "created_at", "updated_at"]
-        extra_kwargs = {f: {"required": False, "allow_null": True} for f in set(fields) - set(read_only_fields)}
+        extra_kwargs = {
+            f: {"required": False, "allow_null": True}
+            for f in set(fields) - set(read_only_fields) - {"first_name", "last_name", "wali_name"}
+        }
 
     def get_completion_percentage(self, obj) -> int:
         return obj.completion_percentage
 
     def validate_how_found(self, value):
         return _validate_multiselect(value, _HOW_FOUND_KEYS, "how_found")
+
+    def to_internal_value(self, data):
+        if hasattr(data, "copy"):
+            mutable = data.copy()
+            for field in ("relation_to_sister", "gender"):
+                val = mutable.get(field)
+                if isinstance(val, str):
+                    mutable[field] = val.strip().lower()
+            data = mutable
+        return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        rep["wali_name"] = instance.user.full_name
+        return rep
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop("user", None)
+        wali_name = validated_data.pop("wali_name", None)
+        user = instance.user
+        updated_user_fields = []
+        if user_data:
+            if "first_name" in user_data:
+                user.first_name = (user_data["first_name"] or "").strip()
+                updated_user_fields.append("first_name")
+            if "last_name" in user_data:
+                user.last_name = (user_data["last_name"] or "").strip()
+                updated_user_fields.append("last_name")
+        elif wali_name is not None:
+            parts = wali_name.strip().split(None, 1)
+            user.first_name = parts[0] if parts else ""
+            user.last_name = parts[1] if len(parts) > 1 else ""
+            updated_user_fields.extend(["first_name", "last_name"])
+        if updated_user_fields:
+            user.save(update_fields=list(dict.fromkeys(updated_user_fields)))
+        return super().update(instance, validated_data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -354,7 +397,7 @@ class WaliBasicInfoSerializer(serializers.ModelSerializer):
             "relationship_with_islam", "role_as_spouse", "about_yourself",
             "envision_spouse", "envision_marriage",
             "spouse_religious_status_pref", "open_to_relocate_details",
-            "health_concerns", "other_preferences",
+            "other_preferences",
             # computed
             "completion_percentage", "age",
             "photos",

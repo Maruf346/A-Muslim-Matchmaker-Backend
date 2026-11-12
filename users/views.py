@@ -967,7 +967,10 @@ class DeactivateAccountView(APIView):
         },
     )
     def post(self, request):
-        serializer = DeactivateAccountSerializer(data=request.data, context={"request": request})
+        serializer = DeactivateAccountSerializer(
+            data=request.data or {},
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         user = request.user
         user.is_active           = False

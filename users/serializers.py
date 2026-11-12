@@ -518,6 +518,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     """
     last_active_display = serializers.SerializerMethodField()
     profile_completion_percentage = serializers.SerializerMethodField()
+    is_profile_locked = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -536,6 +537,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "provider",
             "is_active",
             "is_verified",
+            "is_profile_locked",
             "is_private_matchmaking_client",
             "last_active",
             "last_active_display",
@@ -546,10 +548,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "codename", "email", "role", "gender",
             "subscription_plan", "subscription_start", "subscription_end",
-            "provider", "is_active", "is_verified", "is_private_matchmaking_client", "last_active", "last_active_display",
+            "provider", "is_active", "is_verified", "is_profile_locked", "is_private_matchmaking_client", "last_active", "last_active_display",
             "profile_completion_percentage",
             "created_at", "updated_at",
         ]
+
+    def get_is_profile_locked(self, obj) -> bool:
+        from matches.services import MatchService
+        return MatchService.is_user_locked(obj)
 
     def _get_basic_info(self, obj):
         try:
@@ -569,21 +575,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def get_last_active_display(self, obj) -> str | None:
         """Returns human-readable last active string."""
-        if not obj.last_active:
-            return None
-        from django.utils import timezone
-        delta = timezone.now() - obj.last_active
-        seconds = int(delta.total_seconds())
-        if seconds < 60:
-            return "Active now"
-        if seconds < 3600:
-            minutes = seconds // 60
-            return f"Active {minutes} min{'s' if minutes > 1 else ''} ago"
-        if seconds < 86400:
-            hours = seconds // 3600
-            return f"Active {hours} hr{'s' if hours > 1 else ''} ago"
-        days = seconds // 86400
-        return f"Active {days} day{'s' if days > 1 else ''} ago"
+        from core.utils import format_last_active_display
+        return format_last_active_display(obj)
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -632,6 +625,7 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
             "role",
             "gender",
             "subscription_plan",
+            "is_verified",
             "last_active",
             "last_active_display",
         ]
@@ -660,18 +654,8 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
         return None
 
     def get_last_active_display(self, obj) -> str | None:
-        if not obj.last_active:
-            return None
-        from django.utils import timezone
-        delta   = timezone.now() - obj.last_active
-        seconds = int(delta.total_seconds())
-        if seconds < 60:
-            return "Active now"
-        if seconds < 3600:
-            return f"Active {seconds // 60} min(s) ago"
-        if seconds < 86400:
-            return f"Active {seconds // 3600} hr(s) ago"
-        return f"Active {seconds // 86400} day(s) ago"
+        from core.utils import format_last_active_display
+        return format_last_active_display(obj)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -887,10 +871,19 @@ class AdminToggleVerificationSerializer(serializers.Serializer):
 
 class DeactivateAccountSerializer(serializers.Serializer):
     """User self-deactivation."""
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    password = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        write_only=True,
+        style={"input_type": "password"},
+    )
 
     def validate_password(self, value):
-        if not self.context["request"].user.check_password(value):
+        if not value:
+            return value
+        user = self.context["request"].user
+        if user.has_usable_password() and not user.check_password(value):
             raise serializers.ValidationError("Incorrect password.")
         return value
 

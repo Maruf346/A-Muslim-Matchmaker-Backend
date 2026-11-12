@@ -71,7 +71,6 @@ DIRECTORY_SEARCH_BASIC_INFO_FIELDS = (
     "envision_marriage",
     "spouse_religious_status_pref",
     "open_to_relocate_details",
-    "health_concerns",
     "other_preferences",
     "dress",
     "preferred_dress",
@@ -116,7 +115,6 @@ DIRECTORY_FILTER_PARAMETERS = [
     OpenApiParameter("envision_marriage", str, description="Filter by envision marriage."),
     OpenApiParameter("spouse_religious_status_pref", str, description="Filter by spouse religious status preference."),
     OpenApiParameter("open_to_relocate_details", str, description="Filter by relocation details."),
-    OpenApiParameter("health_concerns", str, description="Filter by health concerns."),
     OpenApiParameter("other_preferences", str, description="Filter by other preferences."),
     OpenApiParameter("dress", str, description="Filter by dress choice (Female/Wali profiles)."),
     OpenApiParameter("preferred_dress", str, description="Filter by preferred dress choice (Male profiles)."),
@@ -417,7 +415,11 @@ class SentRequestsListView(APIView):
         responses={200: ConnectionRequestListSerializer(many=True)},
     )
     def get(self, request):
-        qs = Match.objects.filter(male_user=request.user, status=MatchStatus.PENDING)
+        qs = Match.objects.filter(
+            male_user=request.user,
+            status=MatchStatus.PENDING,
+            other_user__is_active=True,
+        )
         return Response(
             ConnectionRequestListSerializer(qs, many=True, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -447,7 +449,11 @@ class ReceivedRequestsListView(APIView):
                 {"error": "Male users do not receive connection requests."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        qs = Match.objects.filter(other_user=request.user, status=MatchStatus.PENDING)
+        qs = Match.objects.filter(
+            other_user=request.user,
+            status=MatchStatus.PENDING,
+            male_user__is_active=True,
+        )
         return Response(
             ConnectionRequestListSerializer(qs, many=True, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -598,7 +604,11 @@ class MatchListView(APIView):
     )
     def get(self, request):
         user = request.user
-        qs = Match.objects.filter(Q(male_user=user) | Q(other_user=user)).exclude(
+        qs = Match.objects.filter(
+            (Q(male_user=user) | Q(other_user=user)),
+            male_user__is_active=True,
+            other_user__is_active=True,
+        ).exclude(
             status__in=[MatchStatus.PENDING, MatchStatus.DECLINED, MatchStatus.CANCELLED]
         )
 

@@ -263,7 +263,7 @@ class NotificationTemplates:
             notification_type=NotificationType.CONNECTION_REQUEST_DECLINED,
             title="Connection Request Declined",
             body=f"{receiver.codename} has declined your connection request.",
-            data={"receiver_codename": receiver.codename},
+            data={"receiver_codename": receiver.codename, "receiver_id": str(receiver.id)},
             priority=NotificationPriority.NORMAL,
         )
 
@@ -275,24 +275,27 @@ class NotificationTemplates:
             notification_type=NotificationType.CONNECTION_REQUEST_CANCELLED,
             title="Connection Request Cancelled",
             body=f"{sender.codename} has cancelled their connection request.",
-            data={"sender_codename": sender.codename},
+            data={"sender_codename": sender.codename, "sender_id": str(sender.id)},
             priority=NotificationPriority.NORMAL,
         )
 
     # ── Matches ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def match_created(user, match_id: str) -> "Notification | None":
+    def match_created(user, match_id: str, other_user_id: str | None = None) -> "Notification | None":
         """
         Sent to both users when a match is created.
         Call this twice — once per user in the match.
         """
+        payload = {"match_id": match_id}
+        if other_user_id:
+            payload["user_id"] = other_user_id
         return NotificationService.send(
             user=user,
             notification_type=NotificationType.MATCH_CREATED,
             title="You Have a New Match! 🌹",
             body="A mutual interest has been established. You can now view each other's full profiles.",
-            data={"match_id": match_id},
+            data=payload,
             priority=NotificationPriority.HIGH,
         )
 
@@ -306,7 +309,11 @@ class NotificationTemplates:
             notification_type=NotificationType.PHOTO_REQUEST_RECEIVED,
             title="Photo View Request",
             body=f"{requester.codename} is requesting to view your photos again.",
-            data={"requester_codename": requester.codename, "match_id": match_id},
+            data={
+                "requester_codename": requester.codename,
+                "requester_id": str(requester.id),
+                "match_id": match_id,
+            },
             priority=NotificationPriority.NORMAL,
         )
 
@@ -344,7 +351,11 @@ class NotificationTemplates:
             notification_type=NotificationType.WALI_REQUEST_RECEIVED,
             title="Wali Request Received",
             body=f"{requester.codename} has requested to proceed to the Wali stage.",
-            data={"requester_codename": requester.codename, "match_id": match_id},
+            data={
+                "requester_codename": requester.codename,
+                "requester_id": str(requester.id),
+                "match_id": match_id,
+            },
             priority=NotificationPriority.HIGH,
         )
 
@@ -385,7 +396,11 @@ class NotificationTemplates:
             notification_type=NotificationType.UNLOCK_REQUEST_RECEIVED,
             title="Connection Unlock Requested",
             body=f"{requester.codename} has requested to unlock and end the current connection.",
-            data={"requester_codename": requester.codename, "match_id": match_id},
+            data={
+                "requester_codename": requester.codename,
+                "requester_id": str(requester.id),
+                "match_id": match_id,
+            },
             priority=NotificationPriority.URGENT,
         )
 

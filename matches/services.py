@@ -12,6 +12,7 @@ Classes:
 
 import logging
 
+from django.db.models import Q
 from django.utils import timezone
 
 from notifications.services import NotificationTemplates
@@ -144,6 +145,39 @@ class MatchService:
     can call respond_to_connection_request).
     """
 
+    LOCKED_MATCH_STATUSES = (MatchStatus.WALI_ACCEPTED, MatchStatus.IN_DISCUSSION)
+
+    @classmethod
+    def get_active_locked_match(cls, user, exclude_match_id=None) -> "Match | None":
+        """Return the active Wali-discussion match locking `user`, if any."""
+        if not user or not getattr(user, "is_authenticated", False):
+            return None
+        qs = Match.objects.filter(
+            Q(male_user=user) | Q(other_user=user),
+            status__in=cls.LOCKED_MATCH_STATUSES,
+        )
+        if exclude_match_id is not None:
+            qs = qs.exclude(id=exclude_match_id)
+        return qs.first()
+
+    @classmethod
+    def is_user_locked(cls, user, exclude_match_id=None) -> bool:
+        """True if `user` is currently locked in an active Wali discussion."""
+        return cls.get_active_locked_match(user, exclude_match_id=exclude_match_id) is not None
+
+    @classmethod
+    def _assert_users_unlocked(cls, actor, target_user, exclude_match_id=None) -> None:
+        """Raise ValueError if either party is locked in an active Wali discussion."""
+        if cls.is_user_locked(actor, exclude_match_id=exclude_match_id):
+            raise ValueError(
+                "Your profile is currently locked because a discussion with Wali is in progress. "
+                "Unlock it before sending or accepting requests."
+            )
+        if cls.is_user_locked(target_user, exclude_match_id=exclude_match_id):
+            raise ValueError(
+                "This profile is currently locked because a discussion with Wali is in progress."
+            )
+
     # ── Connection requests ───────────────────────────────────────────────────
 
     @staticmethod
@@ -153,8 +187,11 @@ class MatchService:
 
         Raises:
             ValueError if a match already exists between these two users,
+            if either user is locked in an active Wali discussion,
             or if the male user has hit their subscription limit.
         """
+        MatchService._assert_users_unlocked(male_user, target_user)
+
         existing = Match.objects.filter(male_user=male_user, other_user=target_user).first()
         if existing:
             if existing.status in [MatchStatus.DECLINED, MatchStatus.CANCELLED]:
@@ -191,6 +228,7 @@ class MatchService:
             raise ValueError(f"Cannot accept a match with status '{match.status}'.")
         if responder != match.other_user:
             raise ValueError("Only the receiver can accept this request.")
+        MatchService._assert_users_unlocked(responder, match.male_user, exclude_match_id=match.id)
 
         now = timezone.now()
         match.status       = MatchStatus.ACCEPTED
@@ -216,8 +254,16 @@ class MatchService:
             NotificationTemplates.connection_request_accepted(
                 sender=match.male_user, receiver=match.other_user
             )
-            NotificationTemplates.match_created(user=match.male_user, match_id=match.match_id)
-            NotificationTemplates.match_created(user=match.other_user, match_id=match.match_id)
+            NotificationTemplates.match_created(
+                user=match.male_user,
+                match_id=match.match_id,
+                other_user_id=str(match.other_user_id),
+            )
+            NotificationTemplates.match_created(
+                user=match.other_user,
+                match_id=match.match_id,
+                other_user_id=str(match.male_user_id),
+            )
         except Exception:
             logger.exception("Post-accept notifications failed for match %s", match.id)
 
@@ -282,6 +328,8 @@ class MatchService:
         Only allowed if no existing match row exists, or the existing
         row has status DECLINED (in which case it's reset to PENDING).
         """
+        MatchService._assert_users_unlocked(male_user, target_user)
+
         existing = Match.objects.filter(male_user=male_user, other_user=target_user).first()
 
         if existing is None:
@@ -580,6 +628,7 @@ class MatchService:
         """
         if requester != match.male_user:
             raise ValueError("Only the male user can send a wali request.")
+        MatchService._assert_users_unlocked(requester, match.other_user, exclude_match_id=match.id)
         if not match.is_mutual or match.status != MatchStatus.ACCEPTED:
             raise ValueError(
                 f"Wali request can only be sent from 'accepted' status. Current status: '{match.status}'."
@@ -616,6 +665,7 @@ class MatchService:
         """
         if responder != match.other_user:
             raise ValueError("Only the receiver can accept the wali request.")
+        MatchService._assert_users_unlocked(responder, match.male_user, exclude_match_id=match.id)
         if match.wali_request_status != WaliRequestStatus.REQUESTED:
             raise ValueError("There is no pending wali request to accept.")
 

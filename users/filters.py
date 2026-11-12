@@ -48,7 +48,6 @@ class AdminUserFilterSet(filters.FilterSet):
     envision_marriage = filters.CharFilter(method="filter_basic_info_text")
     spouse_religious_status_pref = filters.CharFilter(method="filter_basic_info_text")
     open_to_relocate_details = filters.CharFilter(method="filter_basic_info_text")
-    health_concerns = filters.CharFilter(method="filter_basic_info_text")
     other_preferences = filters.CharFilter(method="filter_basic_info_text")
     dress = filters.CharFilter(method="filter_basic_info_choice")
     preferred_dress = filters.CharFilter(method="filter_basic_info_choice")
@@ -98,7 +97,6 @@ class AdminUserFilterSet(filters.FilterSet):
             "envision_marriage",
             "spouse_religious_status_pref",
             "open_to_relocate_details",
-            "health_concerns",
             "other_preferences",
             "dress",
             "preferred_dress",

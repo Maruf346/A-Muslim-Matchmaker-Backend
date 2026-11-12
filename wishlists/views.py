@@ -84,7 +84,13 @@ class SavedProfilesListView(APIView):
         responses={200: SavedProfileListSerializer(many=True)},
     )
     def get(self, request):
-        qs = SavedProfile.objects.filter(user=request.user).select_related("saved_user")
+        excluded_ids = VisibilityService.get_excluded_user_ids(request.user)
+        qs = SavedProfile.objects.filter(
+            user=request.user,
+            saved_user__is_active=True,
+        ).select_related("saved_user")
+        if excluded_ids:
+            qs = qs.exclude(saved_user_id__in=excluded_ids)
         return Response(
             SavedProfileListSerializer(qs, many=True, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -124,24 +130,36 @@ class ProfileViewersListView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Get most recent view per viewer
-        from django.db.models import Max
-        latest_view_ids = (
+        excluded_ids = VisibilityService.get_excluded_user_ids(request.user)
+        views_qs = (
             ProfileView.objects
-            .filter(viewed_user=request.user)
-            .values("viewer")
-            .annotate(latest=Max("viewed_at"))
-            .values_list("latest", flat=True)
-        )
-        qs = (
-            ProfileView.objects
-            .filter(viewed_user=request.user, viewed_at__in=latest_view_ids)
-            .select_related("viewer")
+            .filter(
+                viewed_user=request.user,
+                viewer__is_active=True,
+                viewer__is_private_matchmaking_client=False,
+            )
+            .exclude(viewer=request.user)
+            .select_related(
+                "viewer",
+                "viewer__male_basic_info",
+                "viewer__female_basic_info",
+                "viewer__wali_basic_info",
+            )
             .order_by("-viewed_at")
         )
+        if excluded_ids:
+            views_qs = views_qs.exclude(viewer_id__in=excluded_ids)
+
+        # Keep only the most recent view per viewer without relying on timestamp subqueries
+        deduped_views = []
+        seen_viewer_ids = set()
+        for pv in views_qs:
+            if pv.viewer_id not in seen_viewer_ids:
+                seen_viewer_ids.add(pv.viewer_id)
+                deduped_views.append(pv)
 
         return Response(
-            ProfileViewListSerializer(qs, many=True, context={"request": request}).data,
+            ProfileViewListSerializer(deduped_views, many=True, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
 

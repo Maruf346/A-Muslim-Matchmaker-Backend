@@ -8,6 +8,8 @@ Organized by concern:
 
 from rest_framework import serializers
 
+from core.utils import format_last_active_display
+
 from .models import ChatRoom, Message
 
 
@@ -16,18 +18,7 @@ from .models import ChatRoom, Message
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _last_active_display(user) -> str | None:
-    if not user or not user.last_active:
-        return None
-    from django.utils import timezone
-    delta   = timezone.now() - user.last_active
-    seconds = int(delta.total_seconds())
-    if seconds < 60:
-        return "Active now"
-    if seconds < 3600:
-        return f"Active {seconds // 60} min(s) ago"
-    if seconds < 86400:
-        return f"Active {seconds // 3600} hr(s) ago"
-    return f"Active {seconds // 86400} day(s) ago"
+    return format_last_active_display(user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
