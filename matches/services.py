@@ -147,6 +147,29 @@ class MatchService:
     """
 
     LOCKED_MATCH_STATUSES = (MatchStatus.WALI_ACCEPTED, MatchStatus.IN_DISCUSSION)
+    # Statuses after which the connection is over and no photo request may stay open.
+    ENDED_MATCH_STATUSES = (MatchStatus.DECLINED, MatchStatus.CANCELLED, MatchStatus.DROPPED)
+
+    @staticmethod
+    def _close_photo_requests(match: Match) -> list[str]:
+        """
+        Close any open photo request and hide photos on a match that is ending.
+        Without this, a pending (second) photo request survives on a cancelled /
+        dropped match and keeps showing up as "Review Photo Request" in the app.
+        Mutates `match` and returns the fields changed (caller saves them).
+        """
+        changed = []
+        if match.photo_request_status == PhotoRequestStatus.REQUESTED:
+            match.photo_request_status = PhotoRequestStatus.NONE
+            match.photo_requested_by = None
+            changed += ["photo_request_status", "photo_requested_by"]
+        if match.second_photo_request_status == SecondPhotoRequestStatus.PENDING:
+            match.second_photo_request_status = SecondPhotoRequestStatus.NONE
+            changed.append("second_photo_request_status")
+        if match.photos_currently_visible:
+            match.photos_currently_visible = False
+            changed.append("photos_currently_visible")
+        return changed
 
     @classmethod
     def get_active_locked_match(cls, user, exclude_match_id=None) -> "Match | None":
@@ -395,7 +418,8 @@ class MatchService:
         match.status       = MatchStatus.CANCELLED
         match.cancelled_by = requester
         match.cancelled_at = timezone.now()
-        match.save(update_fields=["status", "cancelled_by", "cancelled_at", "updated_at"])
+        photo_fields = MatchService._close_photo_requests(match)
+        match.save(update_fields=["status", "cancelled_by", "cancelled_at", *photo_fields, "updated_at"])
 
         other_party = match.other_party(requester)
         try:
@@ -456,6 +480,8 @@ class MatchService:
         """
         if responder != match.other_user:
             raise ValueError("Only the female/wali user can respond to this photo request.")
+        if match.status in MatchService.ENDED_MATCH_STATUSES:
+            raise ValueError("This connection has ended.")
         if match.second_photo_request_status != SecondPhotoRequestStatus.PENDING:
             raise ValueError("There is no pending second photo request to respond to.")
         if match.photo_requested_by_id != match.male_user_id:
@@ -759,8 +785,9 @@ class MatchService:
         match.dropped_by          = requester
         match.dropped_at          = timezone.now()
         match.wali_request_status = WaliRequestStatus.NONE
+        photo_fields = MatchService._close_photo_requests(match)
         match.save(update_fields=[
-            "status", "dropped_by", "dropped_at", "wali_request_status", "updated_at",
+            "status", "dropped_by", "dropped_at", "wali_request_status", *photo_fields, "updated_at",
         ])
 
         other_party = match.other_party(requester)
@@ -831,6 +858,8 @@ class MatchService:
                 match.match_id = generate_match_id()
         if new_status == MatchStatus.IN_DISCUSSION and not match.in_discussion_at:
             match.in_discussion_at = now
+        if new_status in MatchService.ENDED_MATCH_STATUSES:
+            MatchService._close_photo_requests(match)
 
         match.save()
         if should_log_married:

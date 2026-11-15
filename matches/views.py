@@ -31,7 +31,7 @@ from rest_framework.views import APIView
 
 from questions.models import FemaleBasicInfo, MaleBasicInfo, WaliBasicInfo
 from users.filters import AdminUserFilterSet
-from users.models import UserRole
+from users.models import SubscriptionPlan, UserRole
 from users.permissions import IsAdminUser, IsFemaleUser, IsMaleUser, IsNormalUser, IsWaliUser
 from wishlists.services import ProfileViewService, VisibilityService
 
@@ -209,7 +209,7 @@ class DirectoryListView(APIView):
     """
     permission_classes = [IsNormalUser]
     filter_backends    = [SearchFilter, OrderingFilter]
-    search_fields      = ["codename", "email"]
+    search_fields      = ["codename"]  # never search by email/real name
     ordering_fields    = ["last_active", "created_at"]
     ordering           = ["-last_active"]
 
@@ -907,13 +907,13 @@ class RespondToPhotoRequestView(APIView):
     @extend_schema(
         summary="Approve or decline a photo view request",
         description=(
-            "Pass `action`: `approve` or `decline`.\n\n"
+            "Pass `action`: `approve` (or `accept`) or `decline`.\n\n"
             "On approve: `photos_currently_visible=true`, `photos_revealed_count` "
             "increments, timestamps recorded.\n"
             "On decline: resets to `photo_request_status=none`."
         ),
         parameters=[
-            OpenApiParameter("action", str, required=True, description="`approve` or `decline`."),
+            OpenApiParameter("action", str, required=True, description="`approve` (alias `accept`) or `decline`."),
         ],
         responses={
             200: MatchDetailSerializer,
@@ -928,13 +928,14 @@ class RespondToPhotoRequestView(APIView):
 
         action_param = request.query_params.get("action")
         try:
-            if action_param == "approve":
+            # "accept" is accepted too, matching the connection/wali respond endpoints.
+            if action_param in ("approve", "accept"):
                 match = MatchService.approve_photo_request(match, request.user)
             elif action_param == "decline":
                 match = MatchService.decline_photo_request(match, request.user)
             else:
                 return Response(
-                    {"error": "Invalid action. Must be 'approve' or 'decline'."},
+                    {"error": "Invalid action. Must be 'approve' (or 'accept') or 'decline'."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         except ValueError as e:
@@ -1099,7 +1100,9 @@ class ConnectionUsageView(APIView):
             "requests. Free users are counted against a lifetime cap of 2 from "
             "account creation. Monthly users get 10 per billing cycle. "
             "`requests_remaining` and `monthly_limit` are `null` for Annual "
-            "(unlimited)."
+            "(unlimited). `monthly_limit` is the plan's request cap (kept for "
+            "compatibility); `limit_period` says what it covers: `lifetime` "
+            "(Free), `monthly` (Monthly) or `null` (unlimited)."
         ),
         responses={200: ConnectionUsageSerializer},
     )
@@ -1115,6 +1118,12 @@ class ConnectionUsageView(APIView):
             "requests_sent":      sent,
             "requests_remaining": remaining,
             "monthly_limit":      monthly_limit,
+            "request_limit":      monthly_limit,
+            "limit_period":       (
+                None if monthly_limit is None
+                else "lifetime" if user.subscription_plan == SubscriptionPlan.FREE
+                else "monthly"
+            ),
             "cycle_start":        cycle_start,
         }
         return Response(ConnectionUsageSerializer(data).data, status=status.HTTP_200_OK)

@@ -69,6 +69,8 @@ class FreePlanConnectionRequestTests(APITestCase):
         self.assertEqual(usage_response.data["requests_sent"], 2)
         self.assertEqual(usage_response.data["requests_remaining"], 0)
         self.assertEqual(usage_response.data["monthly_limit"], 2)
+        self.assertEqual(usage_response.data["request_limit"], 2)
+        self.assertEqual(usage_response.data["limit_period"], "lifetime")
 
     def test_free_user_cannot_send_a_third_connection_request(self):
         self.client.post(self.send_url, {"target_user_id": str(self.target_one.id)}, format="json")
@@ -534,3 +536,129 @@ class BidirectionalRequestAndUnlockTests(APITestCase):
             format="json",
         )
         self.assertEqual(new_req.status_code, status.HTTP_201_CREATED)
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests-ended-photo",
+        }
+    }
+)
+class EndedMatchPhotoRequestTests(APITestCase):
+    """A pending photo request must not outlive the connection it belongs to."""
+
+    def setUp(self):
+        from matches.services import MatchService
+
+        self.service = MatchService
+        self.brother = User.objects.create_user(
+            email="ended-brother@example.com", password="testpass123",
+            first_name="Ended", last_name="Brother",
+            role=UserRole.MALE, gender=Gender.MALE, is_active=True,
+        )
+        self.sister = User.objects.create_user(
+            email="ended-sister@example.com", password="testpass123",
+            first_name="Ended", last_name="Sister",
+            role=UserRole.FEMALE, gender=Gender.FEMALE, is_active=True,
+        )
+
+    def _match_with_pending_second_photo_request(self):
+        match = self.service.send_connection_request(self.brother, self.sister)
+        match = self.service.accept_connection_request(match, self.sister)
+        match = self.service.mark_photos_viewed(match, self.brother)
+        match = self.service.request_second_photo_view(match, self.brother)
+        self.assertEqual(match.second_photo_request_status, "pending")
+        self.assertEqual(match.photo_request_status, "requested")
+        return match
+
+    def _assert_photo_request_closed(self, match):
+        match.refresh_from_db()
+        self.assertEqual(match.photo_request_status, "none")
+        self.assertIsNone(match.photo_requested_by)
+        self.assertEqual(match.second_photo_request_status, "none")
+        self.assertFalse(match.photos_currently_visible)
+        with self.assertRaisesMessage(ValueError, "This connection has ended."):
+            self.service.respond_second_photo_request(match, self.sister, accepted=True)
+
+    def test_cancel_closes_pending_photo_request(self):
+        match = self._match_with_pending_second_photo_request()
+        self.service.cancel_match(match, self.brother)
+        self._assert_photo_request_closed(match)
+
+    def test_unlock_closes_pending_photo_request(self):
+        match = self._match_with_pending_second_photo_request()
+        Match.objects.filter(pk=match.pk).update(status=MatchStatus.IN_DISCUSSION)
+        match.refresh_from_db()
+        self.service.request_unlock(match, self.sister)
+        self.assertEqual(match.status, MatchStatus.DROPPED)
+        self._assert_photo_request_closed(match)
+
+    def test_admin_drop_closes_pending_photo_request(self):
+        match = self._match_with_pending_second_photo_request()
+        admin = User.objects.create_user(
+            email="ended-admin@example.com", password="testpass123",
+            role=UserRole.SUPERADMIN, is_active=True,
+        )
+        self.service.admin_override_status(match, admin, MatchStatus.DROPPED)
+        self._assert_photo_request_closed(match)
+
+
+    def test_photo_respond_accepts_accept_as_alias_for_approve(self):
+        match = self.service.send_connection_request(self.brother, self.sister)
+        match = self.service.accept_connection_request(match, self.sister)
+        match = self.service.mark_photos_viewed(match, self.brother)
+        self.service.request_second_photo_view(match, self.brother)
+
+        self.client.force_authenticate(self.sister)
+        response = self.client.patch(
+            reverse("match-photo-respond", args=[match.id]) + "?action=accept"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        match.refresh_from_db()
+        self.assertTrue(match.photos_currently_visible)
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "matches-tests-directory-privacy",
+        }
+    }
+)
+class DirectoryNamePrivacyTests(APITestCase):
+    """Before mutual interest, profiles are identified by codename only."""
+
+    def setUp(self):
+        self.brother = User.objects.create_user(
+            email="dir-brother@example.com", password="testpass123",
+            first_name="Dir", last_name="Brother",
+            role=UserRole.MALE, gender=Gender.MALE, is_active=True,
+        )
+        MaleBasicInfo.objects.create(user=self.brother, date_of_birth=date(1990, 1, 1))
+        self.wali = User.objects.create_user(
+            email="dir-wali@example.com", password="testpass123",
+            first_name="Waliname", last_name="Guardian",
+            role=UserRole.WALI, gender=Gender.MALE, is_active=True, codename="W-77",
+        )
+        WaliBasicInfo.objects.create(
+            user=self.wali, date_of_birth=date(1996, 1, 1),
+            sister_first_name="Secretfirst", sister_last_name="Secretlast",
+        )
+        self.client.force_authenticate(self.brother)
+
+    def test_directory_list_and_detail_hide_real_names(self):
+        listing = self.client.get(reverse("directory-list"))
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        rows = listing.data if isinstance(listing.data, list) else listing.data["results"]
+        card = next(r for r in rows if r["codename"] == "W-77")
+        self.assertIsNone(card["first_name"])
+        self.assertIsNone(card["last_name"])
+
+        detail = self.client.get(reverse("directory-detail", args=[self.wali.id]))
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        body = str(detail.data)
+        for secret in ("Secretfirst", "Secretlast", "Waliname", "Guardian"):
+            self.assertNotIn(secret, body)

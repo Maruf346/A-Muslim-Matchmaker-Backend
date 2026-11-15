@@ -60,20 +60,6 @@ def _get_basic_info_serializer(instance, context):
     return None
 
 
-def _get_directory_first_name(user) -> str | None:
-    info = _get_basic_info(user)
-    if user.role == UserRole.WALI and info:
-        return getattr(info, "sister_first_name", None) or user.first_name
-    return user.first_name
-
-
-def _get_directory_last_name(user) -> str | None:
-    info = _get_basic_info(user)
-    if user.role == UserRole.WALI and info:
-        return getattr(info, "sister_last_name", None) or user.last_name
-    return user.last_name
-
-
 def _get_display_name(user, has_mutual_interest: bool) -> str:
     """
     Returns the display name for a user.
@@ -154,11 +140,15 @@ class DirectoryProfileSerializer(serializers.Serializer):
     def get_last_active_display(self, obj) -> str | None:
         return _last_active_display(obj)
 
+    # Real names stay private until mutual interest (business rule); cards show
+    # `codename`. The keys are kept (always null) so existing app builds that
+    # still parse them keep working. After a match, MatchDetail exposes
+    # `display_name` instead.
     def get_first_name(self, obj) -> str | None:
-        return _get_directory_first_name(obj)
+        return None
 
     def get_last_name(self, obj) -> str | None:
-        return _get_directory_last_name(obj)
+        return None
 
     def get_completion_percentage(self, obj) -> int:
         info = _get_basic_info(obj)
@@ -204,6 +194,20 @@ class DirectoryProfileDetailProfileSerializer(DirectoryProfileSerializer):
         return fields
 
 
+# Contact / identifying details (incl. real names) hidden until mutual interest.
+# Wali contact details are revealed only via the match wali-request flow.
+DIRECTORY_PRIVATE_BASIC_INFO_FIELDS = (
+    "phone",
+    "date_of_birth",   # `age` is still exposed
+    "how_found",
+    "wali_name",
+    "wali_relation",
+    "wali_number",
+    "sister_first_name",   # Wali-managed profiles: the sister's real name
+    "sister_last_name",
+)
+
+
 class DirectoryProfileDetailSerializer(serializers.Serializer):
     profile = serializers.SerializerMethodField()
     basic_info = serializers.SerializerMethodField()
@@ -228,7 +232,12 @@ class DirectoryProfileDetailSerializer(serializers.Serializer):
         if not info:
             return None
         serializer = _get_basic_info_serializer(info, self.context)
-        return serializer.data if serializer else None
+        if not serializer:
+            return None
+        data = dict(serializer.data)
+        for field in DIRECTORY_PRIVATE_BASIC_INFO_FIELDS:
+            data.pop(field, None)
+        return data
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -509,7 +518,9 @@ class ConnectionUsageSerializer(serializers.Serializer):
     subscription_plan  = serializers.CharField()
     requests_sent      = serializers.IntegerField()
     requests_remaining = serializers.IntegerField(allow_null=True)
-    monthly_limit      = serializers.IntegerField(allow_null=True)
+    monthly_limit      = serializers.IntegerField(allow_null=True)   # legacy name; see request_limit
+    request_limit      = serializers.IntegerField(allow_null=True)
+    limit_period       = serializers.CharField(allow_null=True)        # "lifetime" | "monthly" | null
     cycle_start        = serializers.DateTimeField()
 
 
