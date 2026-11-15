@@ -172,6 +172,7 @@ class ReportReason(models.TextChoices):
     INAPPROPRIATE   = "inappropriate",   "Inappropriate Content/Behavior"
     SPAM            = "spam",            "Spam"
     HARASSMENT      = "harassment",      "Harassment"
+    CHILD_SAFETY    = "child_safety",    "Child Safety Concern"
     OTHER           = "other",           "Other"
 
 
