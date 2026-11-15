@@ -1125,6 +1125,7 @@ class ConnectionUsageView(APIView):
                 else "monthly"
             ),
             "cycle_start":        cycle_start,
+            "bonus_requests":     user.bonus_requests,
         }
         return Response(ConnectionUsageSerializer(data).data, status=status.HTTP_200_OK)
 

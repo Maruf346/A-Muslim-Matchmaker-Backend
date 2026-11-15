@@ -38,6 +38,9 @@ class SubscriptionLimitService:
                   each month (e.g. subscribed on the 15th → cycle renews
                   on the 15th of every month).
         ANNUAL  → unlimited
+
+    Pay-as-you-go top-ups (user.bonus_requests) are used only after the
+    plan's own allowance runs out, one credit per request sent.
     """
 
     FREE_REQUEST_LIMIT = 2
@@ -107,6 +110,8 @@ class SubscriptionLimitService:
             return True, ""
 
         sent = cls.get_requests_sent_this_cycle(user)
+        if sent >= limit and getattr(user, "bonus_requests", 0) > 0:
+            return True, ""
         if sent >= limit:
             if user.subscription_plan == "free":
                 return False, (
@@ -130,7 +135,25 @@ class SubscriptionLimitService:
         if limit is None:
             return None
         sent = cls.get_requests_sent_this_cycle(user)
-        return max(0, limit - sent)
+        return max(0, limit - sent) + getattr(user, "bonus_requests", 0)
+
+    @classmethod
+    def record_request_sent(cls, user) -> None:
+        """
+        Call right after a request is created. If that request went past the
+        plan allowance, spend one Pay-as-you-go credit.
+        """
+        from django.db.models import F
+        from users.models import User
+
+        limit = cls.get_plan_request_limit(user)
+        if limit is None:
+            return
+        if cls.get_requests_sent_this_cycle(user) > limit:
+            User.objects.filter(pk=user.pk, bonus_requests__gt=0).update(
+                bonus_requests=F("bonus_requests") - 1
+            )
+            user.refresh_from_db(fields=["bonus_requests"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +265,7 @@ class MatchService:
             initiated_by=sender,
             status=MatchStatus.PENDING,
         )
+        SubscriptionLimitService.record_request_sent(sender)
 
         try:
             NotificationTemplates.connection_request_received(
@@ -383,6 +407,7 @@ class MatchService:
                 "initiated_by", "status", "responded_at",
                 "cancelled_by", "cancelled_at", "requested_at", "updated_at",
             ])
+            SubscriptionLimitService.record_request_sent(sender)
 
             try:
                 NotificationTemplates.connection_request_received(

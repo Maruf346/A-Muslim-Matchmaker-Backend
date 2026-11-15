@@ -21,6 +21,7 @@ urlpatterns = [
     path('matchmaking/', include('matchmaking.urls')),
     path('private-matches/', include('private_matches.urls')),
     path('dashboard/', include('dashboard.urls')),
+    path('subscriptions/', include('subscriptions.urls')),
 
     #JWT endpoints
     # path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),

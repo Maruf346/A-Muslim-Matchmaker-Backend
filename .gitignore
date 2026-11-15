@@ -269,3 +269,5 @@ GITHUB_SECRETS_GUIDE.md
 
 /.refact
 /.continue
+# In-app purchase secrets (local copy)
+iap-secrets.local.env

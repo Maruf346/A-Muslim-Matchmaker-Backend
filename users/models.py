@@ -252,6 +252,10 @@ class User(AbstractUser):
     )
     subscription_start = models.DateTimeField(null=True, blank=True)
     subscription_end   = models.DateTimeField(null=True, blank=True)
+    bonus_requests     = models.PositiveIntegerField(
+        default=0,
+        help_text=_("Extra connection requests bought as Pay-as-you-go top-ups."),
+    )
 
     # ── Auth provider ─────────────────────────────────────────────────────────
     provider    = models.CharField(

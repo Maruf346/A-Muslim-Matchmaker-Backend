@@ -522,6 +522,7 @@ class ConnectionUsageSerializer(serializers.Serializer):
     request_limit      = serializers.IntegerField(allow_null=True)
     limit_period       = serializers.CharField(allow_null=True)        # "lifetime" | "monthly" | null
     cycle_start        = serializers.DateTimeField()
+    bonus_requests     = serializers.IntegerField(default=0)  # Pay-as-you-go credits left
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -41,7 +41,13 @@ jobs:
       # ── 3. Deploy ──────────────────────────────────────────────────────────
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          # In-app purchase secrets, copied into the server's .env.production
+          # on every deploy when set (GitHub → Settings → Secrets → Actions).
+          APPLE_SHARED_SECRET: ${{ secrets.APPLE_SHARED_SECRET }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64 }}
         with:
+          envs: APPLE_SHARED_SECRET,GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
@@ -59,6 +65,18 @@ jobs:
 
             echo "→ Pulling latest code from main..."
             git pull origin main
+
+            echo "→ Syncing in-app purchase secrets into .env.production..."
+            upsert_env() {
+              [ -z "$2" ] && return 0
+              touch .env.production
+              grep -v "^$1=" .env.production > .env.production.tmp || true
+              printf '%s=%s\n' "$1" "$2" >> .env.production.tmp
+              mv .env.production.tmp .env.production
+              chmod 600 .env.production
+            }
+            upsert_env APPLE_SHARED_SECRET "$APPLE_SHARED_SECRET"
+            upsert_env GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64 "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64"
 
             echo "→ Recreating containers with cached build layers..."
             for attempt in 1 2 3; do

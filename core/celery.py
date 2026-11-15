@@ -29,5 +29,9 @@ def debug_task(self):
 
 
 app.conf.beat_schedule = {
-    # Example: Run a task every day at midnight
+    # Downgrade users whose App Store / Google Play subscription has lapsed.
+    "expire-lapsed-subscriptions": {
+        "task": "subscriptions.expire_lapsed_subscriptions",
+        "schedule": 60 * 60,  # hourly
+    },
 }

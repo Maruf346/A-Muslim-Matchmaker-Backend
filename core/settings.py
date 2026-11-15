@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'matchmaking',
     'private_matches',
     'dashboard',
+    'subscriptions',
 ]
 
 MIDDLEWARE = [
@@ -673,11 +674,17 @@ ASGI_APPLICATION = 'core.asgi.application'
 # AI_REQUEST_TIMEOUT    = 30
 
 
-# iOS In-App Purchase Configuration
-# IOS_SHARED_SECRET = os.getenv('IOS_SHARED_SECRET', '')
-# IOS_SANDBOX_MODE = os.getenv('IOS_SANDBOX_MODE', 'True') == 'True'
-
-# # Android In-App Purchase Configuration
-# ANDROID_PACKAGE_NAME = os.getenv('ANDROID_PACKAGE_NAME', 'com.autointel.vehicle')
-# GOOGLE_PLAY_SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, 'google-play-service-account.json')
+# In-App Purchases (see subscriptions/stores.py)
+# Apple: App Store Connect → App → App Information → App-Specific Shared Secret
+APPLE_SHARED_SECRET = os.getenv('APPLE_SHARED_SECRET', '')
+APPLE_BUNDLE_ID     = os.getenv('APPLE_BUNDLE_ID', 'com.muslimmatchmaker.app')
+# Google: service account invited in Play Console → Users and permissions
+GOOGLE_PLAY_PACKAGE_NAME         = os.getenv('GOOGLE_PLAY_PACKAGE_NAME', 'com.muslimmatchmaker.app')
+GOOGLE_PLAY_SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_PLAY_SERVICE_ACCOUNT_FILE', '')
+GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', '')
+if not GOOGLE_PLAY_SERVICE_ACCOUNT_JSON and os.getenv('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64'):
+    import base64 as _b64
+    GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = _b64.b64decode(os.getenv('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64')).decode()
+# Optional shared secret appended as ?token= to the Pub/Sub push URL
+GOOGLE_RTDN_TOKEN = os.getenv('GOOGLE_RTDN_TOKEN', '')
 
