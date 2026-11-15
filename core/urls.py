@@ -4,7 +4,7 @@ from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
 
-from core.public_pages import account_deletion
+from core.public_pages import account_deletion, child_safety
 
 
 
@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/', include('api.urls')),
     path('health/', lambda request: JsonResponse({"status": "ok"})),
     path('account-deletion/', account_deletion, name='account-deletion'),
+    path('child-safety/', child_safety, name='child-safety'),
 
     # CKEditor 5 upload
     path('ckeditor5/', include('django_ckeditor_5.urls')),
