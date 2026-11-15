@@ -51,6 +51,7 @@ Full endpoint map:
     DELETE /api/user/admin/matchmakers/{id}/delete/         MatchmakerViewSet.delete_matchmaker
 
     ── Shared auth (all roles) ───────────────────────────────────────
+    POST /api/user/token/refresh/               TokenRefreshView (returns new access + rotated refresh)
     POST /api/user/logout/                      LogoutView
     POST /api/user/password/change/             ChangePasswordView
     POST /api/user/password-reset/initiate/     InitiatePasswordResetView
@@ -72,6 +73,7 @@ Full endpoint map:
 
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import *
 
@@ -107,6 +109,7 @@ urlpatterns = [
     path("admin/profile/",          AdminProfileView.as_view(),          name="admin-profile"),
 
     # ── Shared auth ───────────────────────────────────────────────────────────
+    path("token/refresh/",           TokenRefreshView.as_view(),          name="token-refresh"),
     path("logout/",                  LogoutView.as_view(),                name="logout"),
     path("password/change/",         ChangePasswordView.as_view(),        name="password-change"),
     path("password-reset/initiate/", InitiatePasswordResetView.as_view(), name="password-reset-initiate"),

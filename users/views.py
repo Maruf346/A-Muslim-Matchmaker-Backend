@@ -32,7 +32,9 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -130,6 +132,8 @@ class MaleInitiateRegistrationView(APIView):
     Sets role=MALE and gender=MALE automatically. Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Male — Initiate registration (send OTP)",
@@ -171,6 +175,8 @@ class MaleVerifyRegistrationView(APIView):
     Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Male — Verify OTP & complete registration",
@@ -221,6 +227,8 @@ class FemaleInitiateRegistrationView(APIView):
     Sets role=FEMALE and gender=FEMALE automatically. Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Female — Initiate registration (send OTP)",
@@ -262,6 +270,8 @@ class FemaleVerifyRegistrationView(APIView):
     Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Female — Verify OTP & complete registration",
@@ -313,6 +323,8 @@ class WaliInitiateRegistrationView(APIView):
     Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Wali — Initiate registration (send OTP)",
@@ -354,6 +366,8 @@ class WaliVerifyRegistrationView(APIView):
     Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Wali — Verify OTP & complete registration",
@@ -406,6 +420,8 @@ class ResendRegistrationOTPView(APIView):
     Accessible to: Unauthenticated.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     @extend_schema(
         summary="Resend registration OTP",
@@ -461,6 +477,8 @@ class ResendRegistrationOTPView(APIView):
 )
 class MaleLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = MaleLoginSerializer(data=request.data, context={"request": request})
@@ -484,6 +502,8 @@ class MaleLoginView(APIView):
 )
 class FemaleLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = FemaleLoginSerializer(data=request.data, context={"request": request})
@@ -507,6 +527,8 @@ class FemaleLoginView(APIView):
 )
 class WaliLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = WaliLoginSerializer(data=request.data, context={"request": request})
@@ -530,6 +552,8 @@ class WaliLoginView(APIView):
 )
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = UserLoginSerializer(data=request.data, context={"request": request})
@@ -557,6 +581,8 @@ class UserLoginView(APIView):
 )
 class AdminLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = AdminLoginInitiateSerializer(data=request.data)
@@ -592,6 +618,8 @@ class AdminLoginView(APIView):
 )
 class AdminLoginVerifyOTPView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = AdminLoginVerifyOTPSerializer(data=request.data)
@@ -636,6 +664,8 @@ class AdminLoginVerifyOTPView(APIView):
 )
 class AdminLoginResendOTPView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = AdminResendLoginOTPSerializer(data=request.data)
@@ -669,6 +699,8 @@ class AdminLoginResendOTPView(APIView):
 )
 class GoogleOAuthView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = GoogleOAuthSerializer(data=request.data)
@@ -692,6 +724,8 @@ class GoogleOAuthView(APIView):
 )
 class AppleOAuthView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = AppleOAuthSerializer(data=request.data)
@@ -723,13 +757,14 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        try:
-            refresh_token = request.data.get("refresh")
-            if refresh_token:
+        refresh_token = request.data.get("refresh")
+        if refresh_token:
+            try:
                 RefreshToken(refresh_token).blacklist()
-            return Response({"message": "Logged out successfully."}, status=status.HTTP_205_RESET_CONTENT)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except TokenError:
+                # Already expired/blacklisted/invalid — nothing left to revoke.
+                pass
+        return Response({"message": "Logged out successfully."}, status=status.HTTP_205_RESET_CONTENT)
 
 
 @extend_schema(
@@ -773,6 +808,8 @@ class ChangePasswordView(APIView):
 )
 class InitiatePasswordResetView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = InitiatePasswordResetSerializer(data=request.data)
@@ -805,6 +842,8 @@ class InitiatePasswordResetView(APIView):
 )
 class VerifyPasswordResetOTPView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = VerifyPasswordResetOTPSerializer(data=request.data)
@@ -834,6 +873,8 @@ class VerifyPasswordResetOTPView(APIView):
 )
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
 
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)

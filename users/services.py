@@ -10,7 +10,8 @@ Classes:
 """
 
 import logging
-import random
+import hmac
+import secrets
 import secrets
 import string
 
@@ -26,21 +27,60 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class OTPService:
+    # Wrong guesses allowed per OTP before it is invalidated. With 6 digits this
+    # caps a brute-force success chance at 5 / 1,000,000 per issued OTP.
+    MAX_ATTEMPTS = 5
+    _ATTEMPTS_TTL_SECONDS = 15 * 60
+
     @staticmethod
     def generate_otp(length: int = 6) -> str:
-        return "".join(random.choices(string.digits, k=length))
+        return "".join(secrets.choice(string.digits) for _ in range(length))
+
+    @classmethod
+    def _attempts_key(cls, cache_key: str) -> str:
+        return f"{cache_key}:attempts"
+
+    @classmethod
+    def reset_attempts(cls, cache_key: str) -> None:
+        cache.delete(cls._attempts_key(cache_key))
+
+    @classmethod
+    def check_otp(cls, cache_key: str, stored_otp, provided_otp) -> None:
+        """
+        Constant-time compare. On mismatch, counts the attempt; after
+        MAX_ATTEMPTS wrong guesses the OTP (cache_key) is deleted so the
+        user must request a new one. Raises ValueError on any failure.
+        """
+        if hmac.compare_digest(str(stored_otp), str(provided_otp or "")):
+            cls.reset_attempts(cache_key)
+            return
+        attempts_key = cls._attempts_key(cache_key)
+        cache.add(attempts_key, 0, cls._ATTEMPTS_TTL_SECONDS)
+        try:
+            attempts = cache.incr(attempts_key)
+        except ValueError:  # key evicted between add and incr
+            cache.set(attempts_key, 1, cls._ATTEMPTS_TTL_SECONDS)
+            attempts = 1
+        if attempts >= cls.MAX_ATTEMPTS:
+            cache.delete(cache_key)
+            cls.reset_attempts(cache_key)
+            raise ValueError("Too many incorrect attempts. Please request a new OTP.")
+        raise ValueError("Invalid OTP.")
 
     @staticmethod
     def store_otp(cache_key: str, otp: str, expiry_seconds: int) -> None:
         cache.set(cache_key, otp, expiry_seconds)
+        OTPService.reset_attempts(cache_key)
 
     @staticmethod
     def verify_otp(cache_key: str, provided_otp: str) -> tuple[bool, str]:
         stored = cache.get(cache_key)
         if not stored:
             return False, "OTP expired or not found."
-        if stored != provided_otp:
-            return False, "Invalid OTP."
+        try:
+            OTPService.check_otp(cache_key, stored, provided_otp)
+        except ValueError as exc:
+            return False, str(exc)
         cache.delete(cache_key)
         return True, "OTP verified."
 
@@ -121,6 +161,7 @@ class RegistrationService:
             "otp":       otp,
         }
         cache.set(cache_key, payload, settings.OTP_EXPIRY_SECONDS)
+        OTPService.reset_attempts(cache_key)
 
         try:
             from users.tasks import send_registration_otp_email
@@ -160,8 +201,7 @@ class RegistrationService:
 
         if not payload:
             raise ValueError("OTP expired or not found. Please restart registration.")
-        if payload["otp"] != otp:
-            raise ValueError("Invalid OTP.")
+        OTPService.check_otp(cache_key, payload["otp"], otp)
 
         # Map role string to UserRole choice
         role_map = {
@@ -251,6 +291,7 @@ class RegistrationService:
         new_otp = OTPService.generate_otp()
         payload["otp"] = new_otp
         cache.set(cache_key, payload, settings.OTP_EXPIRY_SECONDS)
+        OTPService.reset_attempts(cache_key)
 
         try:
             from users.tasks import send_registration_otp_email
@@ -305,6 +346,7 @@ class PasswordResetService:
             otp,
             settings.PASSWORD_RESET_OTP_EXPIRY_SECONDS,
         )
+        OTPService.reset_attempts(f"password_reset_otp:{email}")
 
         try:
             from users.tasks import send_password_reset_otp_email
@@ -324,8 +366,7 @@ class PasswordResetService:
 
         if not stored:
             raise ValueError("OTP expired or not found.")
-        if stored != otp:
-            raise ValueError("Invalid OTP.")
+        OTPService.check_otp(key, stored, otp)
 
         reset_token = secrets.token_urlsafe(32)
         cache.set(
@@ -407,6 +448,7 @@ class AdminLoginOTPService:
         otp     = OTPService.generate_otp()
         payload = {"otp": otp, "admin_type": user.role}
         cache.set(cls._OTP_KEY_PREFIX + email, payload, settings.OTP_EXPIRY_SECONDS)
+        OTPService.reset_attempts(cls._OTP_KEY_PREFIX + email)
         cache.set(cls._COOLDOWN_KEY_PREFIX + email, 1, cls._COOLDOWN_SECONDS)
 
         try:
@@ -431,8 +473,7 @@ class AdminLoginOTPService:
 
         if not payload:
             raise ValueError("OTP expired or not found. Please restart login.")
-        if payload["otp"] != otp:
-            raise ValueError("Invalid OTP.")
+        OTPService.check_otp(cache_key, payload["otp"], otp)
 
         try:
             user = User.objects.get(email=email)
@@ -474,6 +515,7 @@ class AdminLoginOTPService:
         new_otp        = OTPService.generate_otp()
         payload["otp"] = new_otp
         cache.set(otp_key, payload, settings.OTP_EXPIRY_SECONDS)
+        OTPService.reset_attempts(otp_key)
         cache.set(cls._COOLDOWN_KEY_PREFIX + email, 1, cls._COOLDOWN_SECONDS)
 
         try:

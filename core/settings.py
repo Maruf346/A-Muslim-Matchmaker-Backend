@@ -13,10 +13,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-&2=269gpy_6f*npn9wr)tdn973w+%uhtw^mt(m3g88s&)ehfgf')
+# DEBUG must be enabled explicitly (DEBUG=True in .env); production is the default.
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
+
+# SECRET_KEY also signs JWTs, so production must never fall back to a known value.
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    if not DEBUG:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("SECRET_KEY environment variable is required when DEBUG is False.")
+    SECRET_KEY = 'django-insecure-local-dev-only-key-do-not-use-in-production'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
@@ -36,6 +44,7 @@ INSTALLED_APPS = [
     
     # Third-party apps
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'drf_spectacular',
     'django_filters',
@@ -118,9 +127,14 @@ _cors_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
 if _cors_origins_env:
     CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins_env.split(',') if o.strip()]
     CORS_ALLOW_ALL_ORIGINS = False
-else:
+elif DEBUG:
     # Development fallback — allow all
     CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # Production without CORS_ALLOWED_ORIGINS: no browser origin is allowed.
+    # (The mobile app does not need CORS; set the admin dashboard URL here.)
+    CORS_ALLOWED_ORIGINS = []
+    CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -129,12 +143,10 @@ _csrf_trusted = set([
     "http://localhost",
     "http://localhost:80",
     "http://127.0.0.1",
-    "https://*.devtunnels.ms",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://admin.amuslimmatchmaker.com",
     "https://api.amuslimmatchmaker.com",
-    "https://tgcg8q7d-5173.inc1.devtunnels.ms",
 ])
 # Add any extra origins from CORS_ALLOWED_ORIGINS to CSRF_TRUSTED_ORIGINS
 if _cors_origins_env:
@@ -340,7 +352,14 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.MultiPartParser',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    
+    # Per-IP limits for unauthenticated auth endpoints (see throttle_scope in users/views.py).
+    # "otp": endpoints that verify an OTP or send an OTP email; "auth": password/OAuth logins.
+    'DEFAULT_THROTTLE_RATES': {
+        'otp': os.getenv('THROTTLE_RATE_OTP', '10/min'),
+        'auth': os.getenv('THROTTLE_RATE_AUTH', '20/min'),
+    },
+    # Nginx sits in front of Django, so the client IP is the last X-Forwarded-For hop.
+    'NUM_PROXIES': int(os.getenv('DRF_NUM_PROXIES', '1')),
 }
 
 
