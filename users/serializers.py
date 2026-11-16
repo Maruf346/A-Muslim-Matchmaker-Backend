@@ -876,13 +876,13 @@ class AdminUserListSerializer(serializers.ModelSerializer):
         if direct_url:
             return direct_url
         from questions.models import UserPhoto
-        primary_photo = UserPhoto.objects.filter(user=obj).order_by("order", "created_at").first()
+        primary_photo = UserPhoto.objects.filter(user=obj).order_by("-is_primary", "created_at").first()
         return self._build_file_url(getattr(primary_photo, "image", None)) if primary_photo else None
 
     def get_photos(self, obj) -> list:
         from questions.models import UserPhoto
         from questions.serializers import UserPhotoSerializer
-        photos = UserPhoto.objects.filter(user=obj).order_by("order", "created_at")
+        photos = UserPhoto.objects.filter(user=obj).order_by("-is_primary", "created_at")
         return UserPhotoSerializer(photos, many=True, context=self.context).data
 
 

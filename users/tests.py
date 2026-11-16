@@ -67,3 +67,44 @@ class UserProfileCompletionTests(APITestCase):
         self.assertEqual(verified_response.status_code, status.HTTP_200_OK)
         self.assertIs(verified_response.data["is_verified"], True)
         self.assertIs(_build_token_data(self.user)["user"]["is_verified"], True)
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "admin-users-tests",
+        }
+    }
+)
+class AdminUserListTests(APITestCase):
+    """Regression: the admin Users page returned 500 when a user had photos
+    (the serializer ordered UserPhoto by a non-existent `order` field)."""
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from questions.models import UserPhoto
+
+        self.admin = User.objects.create_user(
+            email="admin-list@example.com", password="pw-123456", role=UserRole.SUPERADMIN,
+        )
+        self.member = User.objects.create_user(
+            email="member@example.com", password="pw-123456", role=UserRole.MALE, gender=Gender.MALE,
+        )
+        gif = (b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04"
+               b"\x00\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")
+        UserPhoto.objects.create(user=self.member, image=SimpleUploadedFile("a.gif", gif, "image/gif"))
+        self.primary = UserPhoto.objects.create(
+            user=self.member, is_primary=True, image=SimpleUploadedFile("b.gif", gif, "image/gif"),
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def test_admin_user_list_with_photos(self):
+        response = self.client.get("/api/user/admin/users/?page=1&page_size=8")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content[:300])
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        member = next(r for r in rows if r["email"] == "member@example.com")
+        self.assertEqual(len(member["photos"]), 2)
+        self.assertEqual(str(member["photos"][0]["id"]), str(self.primary.id))
+        self.assertIn("b", member["profile_picture"].rsplit("/", 1)[-1])
