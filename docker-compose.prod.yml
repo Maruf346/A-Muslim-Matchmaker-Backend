@@ -27,6 +27,7 @@ x-django-base: &django-base
   environment:
     REDIS_HOST: redis
     REDIS_PORT: "6379"
+    FCM_ENABLED: "True"
   depends_on:
     redis:
       condition: service_healthy
@@ -63,6 +64,7 @@ services:
       SERVICE_TYPE: django
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      FCM_ENABLED: "True"   # mobile push via keyless FCM (notifications/push.py)
     # Django is NOT exposed to the host — Nginx is the only entry point
     expose:
       - "8000"
@@ -85,6 +87,7 @@ services:
       SERVICE_TYPE: celery_worker
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      FCM_ENABLED: "True"   # mobile push via keyless FCM (notifications/push.py)
     depends_on:
       redis:
         condition: service_healthy
@@ -99,6 +102,7 @@ services:
       SERVICE_TYPE: celery_beat
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      FCM_ENABLED: "True"   # mobile push via keyless FCM (notifications/push.py)
     depends_on:
       redis:
         condition: service_healthy

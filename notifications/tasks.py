@@ -8,7 +8,8 @@ To add a new periodic task:
     2. Register it in core/celery.py under app.conf.beat_schedule.
 
 Current tasks:
-    (none active — placeholders ready for future use)
+    notifications.send_push — deliver a saved Notification to the user's
+    phones through Firebase Cloud Messaging (see notifications/push.py).
 """
 
 import logging
@@ -18,6 +19,35 @@ from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+
+@shared_task(
+    name="notifications.send_push",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    max_retries=3,
+    ignore_result=True,
+)
+def send_push(notification_id: str):
+    """Push one Notification to every registered device of its user."""
+    from .models import Notification
+    from .push import send_to_user
+
+    notification = (
+        Notification.objects.select_related("user")
+        .filter(id=notification_id)
+        .first()
+    )
+    if notification is None:
+        return
+    data = dict(notification.data or {})
+    data["notification_id"] = str(notification.id)
+    data["notification_type"] = notification.notification_type
+    sent = send_to_user(notification.user, notification.title, notification.body, data)
+    logger.info(
+        "Push %s → %s (%d device(s))",
+        notification.notification_type, notification.user.email, sent,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

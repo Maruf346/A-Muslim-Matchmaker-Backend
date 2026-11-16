@@ -20,17 +20,20 @@ REST endpoints registered here:
     /api/notification/admin/mark-all-read/
     /api/notification/admin/unread-count/
     /api/notification/admin/clear-read/
+
+    /api/notification/devices/             → DeviceTokenView (POST register, DELETE unregister)
 """
 
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import AdminNotificationViewSet, SharedNotificationViewSet
+from .views import AdminNotificationViewSet, DeviceTokenView, SharedNotificationViewSet
 
 router = DefaultRouter()
 router.register(r"shared", SharedNotificationViewSet, basename="notification-shared")
 router.register(r"admin",  AdminNotificationViewSet,  basename="notification-admin")
 
 urlpatterns = [
+    path("devices/", DeviceTokenView.as_view(), name="notification-devices"),
     path("", include(router.urls)),
 ]

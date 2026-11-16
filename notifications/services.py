@@ -2,7 +2,8 @@
 notifications/services.py
 
 Delivery strategy:
-    Male / Female / Wali → DB record only. Mobile app polls REST endpoints.
+    Male / Female / Wali → DB record + FCM push to registered phones
+        (queued on Celery when FCM_ENABLED; the app also polls REST).
     Admin (Matchmaker / Superadmin) → DB record + real-time WebSocket push.
 
 Usage:
@@ -18,7 +19,9 @@ import logging
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.utils import timezone
 
 from .models import *
@@ -100,11 +103,31 @@ class NotificationService:
             )
         else:
             logger.info(
-                "Notification saved → %s | type=%s | role=%s (REST polling)",
+                "Notification saved → %s | type=%s | role=%s (REST + push)",
                 user.email, notification_type, getattr(user, "role", "unknown"),
             )
+            NotificationService._queue_push(notification)
 
         return notification
+
+    # ── Mobile push — Male / Female / Wali ────────────────────────────────────
+
+    @staticmethod
+    def _queue_push(notification) -> None:
+        """Queue FCM delivery after the DB transaction commits. Never raises."""
+        if not settings.FCM_ENABLED:
+            return
+
+        notification_id = str(notification.id)
+
+        def _enqueue():
+            try:
+                from .tasks import send_push
+                send_push.delay(notification_id)
+            except Exception:
+                logger.exception("Could not queue push for notification %s", notification_id)
+
+        transaction.on_commit(_enqueue)
 
     # ── WebSocket push — admin dashboard only ─────────────────────────────────
 

@@ -35,6 +35,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import *
 from .serializers import *
@@ -276,3 +277,55 @@ class AdminNotificationViewSet(_NotificationMixin, viewsets.ReadOnlyModelViewSet
     """
     # permission_classes = [IsAdminUser]  # TODO: swap in once permission class is defined
     permission_classes = [IsAuthenticated]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Push device registration — Male / Female / Wali apps
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(tags=["Notifications - Shared"])
+class DeviceTokenView(APIView):
+    """
+    The app calls POST after login and whenever FCM rotates the token,
+    and DELETE on logout so the phone stops receiving this user's pushes.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Register this device for push notifications",
+        description=(
+            "Saves the Firebase Cloud Messaging token of this app install for the "
+            "current user. A token already registered to another account is moved "
+            "to the current user (same phone, different login). `platform` is "
+            "`ios` or `android`."
+        ),
+        request=DeviceTokenSerializer,
+        responses={200: OpenApiResponse(description="Registered.")},
+    )
+    def post(self, request):
+        serializer = DeviceTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        platform = serializer.validated_data.get("platform")
+        if not platform:
+            return Response(
+                {"platform": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        DeviceToken.objects.update_or_create(
+            token=serializer.validated_data["token"],
+            defaults={"user": request.user, "platform": platform},
+        )
+        return Response({"message": "Device registered."}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Unregister this device from push notifications",
+        description="Call on logout. Only removes the token if it belongs to the current user.",
+        request=DeviceTokenSerializer,
+        responses={200: OpenApiResponse(description="Removed (or was not registered).")},
+    )
+    def delete(self, request):
+        serializer = DeviceTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        DeviceToken.objects.filter(
+            user=request.user, token=serializer.validated_data["token"]
+        ).delete()
+        return Response({"message": "Device removed."}, status=status.HTTP_200_OK)

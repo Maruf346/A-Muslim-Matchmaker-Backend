@@ -136,3 +136,34 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"[{self.notification_type}] {self.title} → {self.user.email}"
+
+
+class DevicePlatform(models.TextChoices):
+    IOS     = "ios",     "iOS"
+    ANDROID = "android", "Android"
+
+
+class DeviceToken(models.Model):
+    """
+    Firebase Cloud Messaging registration token for one app install.
+
+    A token belongs to exactly one install, so it is unique across users:
+    when another account signs in on the same phone the row is re-assigned.
+    Tokens FCM reports as unregistered are deleted by notifications.push.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="device_tokens",
+    )
+    token      = models.CharField(max_length=512, unique=True)
+    platform   = models.CharField(max_length=10, choices=DevicePlatform.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"{self.platform} token → {self.user.email}"

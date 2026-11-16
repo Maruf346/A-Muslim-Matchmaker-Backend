@@ -457,6 +457,24 @@ CELERY_TASK_TRACK_STARTED = True  # Celery tracks when a task starts executing.
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 
 
+# ── Firebase Cloud Messaging (mobile push) ────────────────────────────────
+# Keyless in production: the EC2 role `amm-ec2-fcm` impersonates the Firebase
+# Admin SDK service account via Google Workload Identity Federation.
+# None of these values are secrets. See notifications/push.py.
+FCM_ENABLED = os.getenv('FCM_ENABLED', 'False') == 'True'
+FCM_PROJECT_ID = os.getenv('FCM_PROJECT_ID', 'a-muslim-matchmaker')
+FCM_CREDENTIALS_MODE = os.getenv('FCM_CREDENTIALS_MODE', 'wif')  # 'wif' or 'file'
+FCM_WIF_AUDIENCE = os.getenv(
+    'FCM_WIF_AUDIENCE',
+    '//iam.googleapis.com/projects/628950763605/locations/global/'
+    'workloadIdentityPools/amm-aws-backend/providers/amm-aws',
+)
+FCM_SERVICE_ACCOUNT = os.getenv(
+    'FCM_SERVICE_ACCOUNT',
+    'firebase-adminsdk-fbsvc@a-muslim-matchmaker.iam.gserviceaccount.com',
+)
+
+
 # ── And the Redis cache section ───────────────────────────────────────────
 _REDIS_HOST = os.environ.get('REDIS_HOST') or 'localhost'
 _REDIS_PORT = os.environ.get('REDIS_PORT') or '6379'

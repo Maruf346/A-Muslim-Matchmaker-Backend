@@ -38,3 +38,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+class DeviceTokenSerializer(serializers.Serializer):
+    """Register / unregister this install's FCM token."""
+
+    token    = serializers.CharField(max_length=512)
+    platform = serializers.ChoiceField(choices=["ios", "android"], required=False)
